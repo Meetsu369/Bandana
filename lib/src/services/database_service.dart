@@ -6,6 +6,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
 
+import '../core/constants/ble_constants.dart';
+import '../models/imu_sample.dart' as model;
+
 part 'database_service.g.dart';
 
 // ── Table Definitions ──
@@ -19,10 +22,30 @@ class Sessions extends Table {
   IntColumn get sampleCount => integer().withDefault(const Constant(0))();
 }
 
-/// Feature windows extracted from sensor data during recording.
+/// Individual IMU samples stored for each band during recording.
+/// This replaces the SensorWindows table for raw data storage.
+class ImuSampleRecords extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sessionId => integer().references(Sessions, #id)();
+  TextColumn get bandRole => text()(); // 'wrist' or 'ankle'
+  TextColumn get deviceId => text()();
+  TextColumn get deviceName => text()();
+  RealColumn get ax => real()();
+  RealColumn get ay => real()();
+  RealColumn get az => real()();
+  RealColumn get gx => real()();
+  RealColumn get gy => real()();
+  RealColumn get gz => real()();
+  RealColumn get accelMagnitude => real()();
+  RealColumn get gyroMagnitude => real()();
+  DateTimeColumn get timestamp => dateTime()();
+}
+
+/// Feature windows extracted from sensor data during recording (for ML training).
 class SensorWindows extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get sessionId => integer().references(Sessions, #id)();
+  TextColumn get bandRole => text()(); // 'wrist', 'ankle', or 'combined'
   TextColumn get features => text()(); // JSON-encoded list of doubles
   TextColumn get label => text()();
   DateTimeColumn get timestamp => dateTime()();
@@ -30,12 +53,26 @@ class SensorWindows extends Table {
 
 // ── Database ──
 
-@DriftDatabase(tables: [Sessions, SensorWindows])
+@DriftDatabase(tables: [Sessions, ImuSampleRecords, SensorWindows])
 class DatabaseService extends _$DatabaseService {
   DatabaseService() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (Migrator m) async {
+          await m.createAll();
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            // Create new tables for dual-band support
+            await m.createTable(imuSampleRecords);
+            await m.addColumn(sensorWindows, sensorWindows.bandRole);
+          }
+        },
+      );
 
   // ── Sessions ──
 
@@ -82,25 +119,95 @@ class DatabaseService extends _$DatabaseService {
     return map;
   }
 
-  /// Delete a session and its associated windows.
+  /// Delete a session and its associated data.
   Future<void> deleteSession(int sessionId) async {
-    await (delete(sensorWindows)
-          ..where((w) => w.sessionId.equals(sessionId)))
-        .go();
+    await (delete(imuSampleRecords)..where((w) => w.sessionId.equals(sessionId))).go();
+    await (delete(sensorWindows)..where((w) => w.sessionId.equals(sessionId))).go();
     await (delete(sessions)..where((s) => s.id.equals(sessionId))).go();
   }
 
-  // ── Sensor Windows ──
+  // ── IMU Samples (raw data) ──
+
+  /// Insert a batch of IMU samples for a session.
+  Future<void> insertImuSamples({
+    required int sessionId,
+    required List<model.ImuSample> samples,
+  }) async {
+    if (samples.isEmpty) return;
+    await transaction(() async {
+      for (final sample in samples) {
+        await into(imuSampleRecords).insert(
+          ImuSampleRecordsCompanion(
+            sessionId: Value(sessionId),
+            bandRole: Value(sample.bandRole.name),
+            deviceId: Value(sample.deviceId),
+            deviceName: Value(sample.deviceName),
+            ax: Value(sample.ax),
+            ay: Value(sample.ay),
+            az: Value(sample.az),
+            gx: Value(sample.gx),
+            gy: Value(sample.gy),
+            gz: Value(sample.gz),
+            accelMagnitude: Value(sample.accelMagnitude),
+            gyroMagnitude: Value(sample.gyroMagnitude),
+            timestamp: Value(sample.timestamp),
+          ),
+        );
+      }
+    });
+  }
+
+  /// Get all IMU samples for a session, optionally filtered by band role.
+  Future<List<ImuSampleData>> getImuSamples({
+    required int sessionId,
+    BandRole? bandRole,
+  }) async {
+    final query = select(imuSampleRecords)..where((w) => w.sessionId.equals(sessionId));
+    if (bandRole != null) {
+      query.where((w) => w.bandRole.equals(bandRole.name));
+    }
+    query.orderBy([(w) => OrderingTerm.asc(w.timestamp)]);
+    final rows = await query.get();
+    return rows.map((r) => ImuSampleData(
+      id: r.id,
+      sessionId: r.sessionId,
+      bandRole: BandRole.values.byName(r.bandRole),
+      deviceId: r.deviceId,
+      deviceName: r.deviceName,
+      ax: r.ax,
+      ay: r.ay,
+      az: r.az,
+      gx: r.gx,
+      gy: r.gy,
+      gz: r.gz,
+      accelMagnitude: r.accelMagnitude,
+      gyroMagnitude: r.gyroMagnitude,
+      timestamp: r.timestamp,
+    )).toList();
+  }
+
+  /// Get sample count for a session (across both bands).
+  Future<int> getSampleCount(int sessionId) async {
+    final count = countAll();
+    final query = selectOnly(imuSampleRecords)..addColumns([count]);
+    query.where(imuSampleRecords.sessionId.equals(sessionId));
+    final result = await query.getSingle();
+    return result.read(count) ?? 0;
+  }
+
+  // ── Sensor Windows (for ML training) ──
 
   /// Insert a feature window for a session.
   Future<void> insertWindow({
     required int sessionId,
     required List<double> featureVector,
     required String label,
+    required BandRole bandRole,
   }) async {
     await into(sensorWindows).insert(
       SensorWindowsCompanion.insert(
         sessionId: sessionId,
+        bandRole: bandRole.name,
         features: jsonEncode(featureVector),
         label: label,
         timestamp: DateTime.now(),
@@ -109,10 +216,26 @@ class DatabaseService extends _$DatabaseService {
   }
 
   /// Load all feature windows for ML training.
-  /// Returns a list of (featureVector, label) pairs.
-  Future<List<({List<double> features, String label})>>
+  Future<List<({List<double> features, String label, BandRole bandRole})>>
       getAllWindowsForTraining() async {
     final rows = await select(sensorWindows).get();
+    return rows.map((row) {
+      final featureList =
+          (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
+      return (
+        features: featureList,
+        label: row.label,
+        bandRole: BandRole.values.byName(row.bandRole),
+      );
+    }).toList();
+  }
+
+  /// Get windows for a specific band role.
+  Future<List<({List<double> features, String label})>>
+      getWindowsForTraining({required BandRole bandRole}) async {
+    final rows = await (select(sensorWindows)
+          ..where((w) => w.bandRole.equals(bandRole.name)))
+        .get();
     return rows.map((row) {
       final featureList =
           (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
@@ -136,13 +259,79 @@ class DatabaseService extends _$DatabaseService {
     return rows.length;
   }
 
+  /// Get window counts grouped by band role.
+  Future<Map<BandRole, int>> getWindowCountsByRole() async {
+    final map = <BandRole, int>{};
+    for (final role in BandRole.values) {
+      final count = countAll();
+      final query = selectOnly(sensorWindows)..addColumns([count]);
+      query.where(sensorWindows.bandRole.equals(role.name));
+      final result = await query.getSingle();
+      map[role] = result.read(count) ?? 0;
+    }
+    return map;
+  }
+
   // ── Danger zone ──
 
-  /// Delete all sessions and windows.
+  /// Delete all sessions and associated data.
   Future<void> clearAll() async {
+    await delete(imuSampleRecords).go();
     await delete(sensorWindows).go();
     await delete(sessions).go();
   }
+}
+
+// ── Data Classes ──
+
+/// Lightweight data class for IMU samples from database.
+class ImuSampleData {
+  final int id;
+  final int sessionId;
+  final BandRole bandRole;
+  final String deviceId;
+  final String deviceName;
+  final double ax;
+  final double ay;
+  final double az;
+  final double gx;
+  final double gy;
+  final double gz;
+  final double accelMagnitude;
+  final double gyroMagnitude;
+  final DateTime timestamp;
+
+  const ImuSampleData({
+    required this.id,
+    required this.sessionId,
+    required this.bandRole,
+    required this.deviceId,
+    required this.deviceName,
+    required this.ax,
+    required this.ay,
+    required this.az,
+    required this.gx,
+    required this.gy,
+    required this.gz,
+    required this.accelMagnitude,
+    required this.gyroMagnitude,
+    required this.timestamp,
+  });
+
+  List<double> toList() => [ax, ay, az, gx, gy, gz];
+
+  model.ImuSample toModelImuSample() => model.ImuSample(
+        ax: ax,
+        ay: ay,
+        az: az,
+        gx: gx,
+        gy: gy,
+        gz: gz,
+        timestamp: timestamp,
+        bandRole: bandRole,
+        deviceId: deviceId,
+        deviceName: deviceName,
+      );
 }
 
 // ── Connection helper ──

@@ -12,6 +12,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await setupServiceLocator();
   runApp(const ProviderScope(child: BandanaApp()));
+
 }
 
 /// Root application widget.

@@ -41,6 +41,9 @@ dependencies:
   # Permissions
   permission_handler: ^11.3.0
 
+  # Persistent storage
+  shared_preferences: ^2.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

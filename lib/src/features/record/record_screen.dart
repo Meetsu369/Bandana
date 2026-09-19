@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import '../../core/constants/ble_constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/imu_sample.dart' as model;
 import '../../models/sensor_data.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
-import '../../widgets/ble_status_indicator.dart';
 import '../../widgets/sensor_chart.dart';
 
 /// Record Mode screen – tag and record IMU data streams with activity labels.
@@ -29,45 +29,100 @@ class _RecordScreenState extends State<RecordScreen>
   String _selectedLabel = BleConstants.defaultLabels.first;
   bool _isRecording = false;
   int? _sessionId;
-  int _sampleCount = 0;
+  int _wristSampleCount = 0;
+  int _ankleSampleCount = 0;
 
-  // ── Sensor buffer ──
-  final List<SensorReading> _chartBuffer = [];
-  List<SensorReading> _windowBuffer = [];
-  StreamSubscription<SensorReading>? _sensorSub;
-  StreamSubscription<BleConnectionState>? _bleSub;
-  BleConnectionState _bleState = BleConnectionState.disconnected;
+  // ── Sensor buffers ──
+  final List<model.ImuSample> _wristChartBuffer = [];
+  final List<model.ImuSample> _ankleChartBuffer = [];
+  final List<model.ImuSample> _wristWindowBuffer = [];
+  final List<model.ImuSample> _ankleWindowBuffer = [];
+  final List<model.ImuSample> _wristPendingDbWrite = [];
+  final List<model.ImuSample> _anklePendingDbWrite = [];
+
+  StreamSubscription<model.ImuSample>? _wristSensorSub;
+  StreamSubscription<model.ImuSample>? _ankleSensorSub;
+  StreamSubscription<BandConnectionState>? _wristBleSub;
+  StreamSubscription<BandConnectionState>? _ankleBleSub;
+  BandConnectionState _wristBleState = BandConnectionState.disconnected;
+  BandConnectionState _ankleBleState = BandConnectionState.disconnected;
 
   // ── Animation ──
   late AnimationController _pulseController;
 
+  // ── Performance tracking ──
+  int _wristPacketsReceived = 0;
+  int _anklePacketsReceived = 0;
+  int _wristMalformedPackets = 0;
+  int _ankleMalformedPackets = 0;
+  DateTime? _recordingStartTime;
+
   @override
   void initState() {
     super.initState();
-    _bleState = _ble.currentState;
-    _bleSub = _ble.connectionState.listen((state) {
-      if (mounted) setState(() => _bleState = state);
+    _wristBleState = _ble.wrist.currentState;
+    _ankleBleState = _ble.ankle.currentState;
+    _wristBleSub = _ble.wrist.stateStream.listen((state) {
+      if (mounted) setState(() => _wristBleState = state);
+    });
+    _ankleBleSub = _ble.ankle.stateStream.listen((state) {
+      if (mounted) setState(() => _ankleBleState = state);
     });
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
+
+    // Periodic DB flush
+    _startDbFlushTimer();
+  }
+
+  Timer? _dbFlushTimer;
+  void _startDbFlushTimer() {
+    _dbFlushTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _flushDbBuffers();
+    });
+  }
+
+  Future<void> _flushDbBuffers() async {
+    if (_sessionId == null) return;
+    if (_wristPendingDbWrite.isEmpty && _anklePendingDbWrite.isEmpty) return;
+
+    final wristToWrite = List<model.ImuSample>.from(_wristPendingDbWrite);
+    final ankleToWrite = List<model.ImuSample>.from(_anklePendingDbWrite);
+    _wristPendingDbWrite.clear();
+    _anklePendingDbWrite.clear();
+
+    await Future.wait([
+      _db.insertImuSamples(sessionId: _sessionId!, samples: wristToWrite),
+      _db.insertImuSamples(sessionId: _sessionId!, samples: ankleToWrite),
+    ]);
   }
 
   @override
   void dispose() {
-    _stopRecording(showSnackbar: false);
-    _sensorSub?.cancel();
-    _bleSub?.cancel();
+    try {
+      _stopRecording(showSnackbar: false);
+    } catch (_) {
+      // Ignore errors during disposal
+    }
+    _wristSensorSub?.cancel();
+    _ankleSensorSub?.cancel();
+    _wristBleSub?.cancel();
+    _ankleBleSub?.cancel();
+    _dbFlushTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
   void _startRecording() async {
-    if (_bleState != BleConnectionState.connected) {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    if (!hasWrist && !hasAnkle) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Connect to BANDANA_HAR first (Settings tab).'),
+          content: Text('Connect at least one band (Wrist or Ankle) first.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -80,71 +135,126 @@ class _RecordScreenState extends State<RecordScreen>
     setState(() {
       _isRecording = true;
       _sessionId = sessionId;
-      _sampleCount = 0;
-      _windowBuffer = [];
-      _chartBuffer.clear();
+      _wristSampleCount = 0;
+      _ankleSampleCount = 0;
+      _wristWindowBuffer.clear();
+      _ankleWindowBuffer.clear();
+      _wristChartBuffer.clear();
+      _ankleChartBuffer.clear();
+      _wristPacketsReceived = 0;
+      _anklePacketsReceived = 0;
+      _wristMalformedPackets = 0;
+      _ankleMalformedPackets = 0;
+      _recordingStartTime = DateTime.now();
     });
 
     _pulseController.repeat(reverse: true);
 
-    // Subscribe to sensor stream.
-    _sensorSub = _ble.sensorStream.listen(_onSensorData);
-  }
-
-  void _onSensorData(SensorReading reading) {
-    if (!_isRecording) return;
-
-    setState(() {
-      // Add to chart display buffer (rolling).
-      _chartBuffer.add(reading);
-      if (_chartBuffer.length > 50) {
-        _chartBuffer.removeAt(0);
-      }
-    });
-
-    // Add to window buffer for feature extraction.
-    _windowBuffer.add(reading);
-
-    // When we have a full window, extract features and save.
-    if (_windowBuffer.length >= BleConstants.windowSize) {
-      _processWindow();
+    // Subscribe to wrist sensor stream
+    if (hasWrist) {
+      _wristSensorSub = _ble.wrist.sensorStream.listen(_onWristSensorData);
+    }
+    // Subscribe to ankle sensor stream
+    if (hasAnkle) {
+      _ankleSensorSub = _ble.ankle.sensorStream.listen(_onAnkleSensorData);
     }
   }
 
-  Future<void> _processWindow() async {
+  void _onWristSensorData(model.ImuSample sample) {
+    if (!_isRecording) return;
+
+    _wristPacketsReceived++;
+    setState(() {
+      _wristChartBuffer.add(sample);
+      if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
+    });
+
+    _wristWindowBuffer.add(sample);
+    _wristPendingDbWrite.add(sample);
+
+    if (_wristWindowBuffer.length >= BleConstants.windowSize) {
+      _processWristWindow();
+    }
+  }
+
+  void _onAnkleSensorData(model.ImuSample sample) {
+    if (!_isRecording) return;
+
+    _anklePacketsReceived++;
+    setState(() {
+      _ankleChartBuffer.add(sample);
+      if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
+    });
+
+    _ankleWindowBuffer.add(sample);
+    _anklePendingDbWrite.add(sample);
+
+    if (_ankleWindowBuffer.length >= BleConstants.windowSize) {
+      _processAnkleWindow();
+    }
+  }
+
+  Future<void> _processWristWindow() async {
     if (_sessionId == null) return;
 
-    final window = List<SensorReading>.from(_windowBuffer);
-    _windowBuffer.clear();
+    final window = List<model.ImuSample>.from(_wristWindowBuffer);
+    _wristWindowBuffer.clear();
 
-    final features = MlService.extractFeatures(window);
+    final features = MlService.extractFeaturesFromImuSamples(window);
 
     await _db.insertWindow(
       sessionId: _sessionId!,
       featureVector: features,
       label: _selectedLabel,
+      bandRole: BandRole.wrist,
     );
 
     if (mounted) {
-      setState(() => _sampleCount++);
+      setState(() => _wristSampleCount++);
+    }
+  }
+
+  Future<void> _processAnkleWindow() async {
+    if (_sessionId == null) return;
+
+    final window = List<model.ImuSample>.from(_ankleWindowBuffer);
+    _ankleWindowBuffer.clear();
+
+    final features = MlService.extractFeaturesFromImuSamples(window);
+
+    await _db.insertWindow(
+      sessionId: _sessionId!,
+      featureVector: features,
+      label: _selectedLabel,
+      bandRole: BandRole.ankle,
+    );
+
+    if (mounted) {
+      setState(() => _ankleSampleCount++);
     }
   }
 
   Future<void> _stopRecording({bool showSnackbar = true}) async {
-    _sensorSub?.cancel();
-    _sensorSub = null;
+    _wristSensorSub?.cancel();
+    _wristSensorSub = null;
+    _ankleSensorSub?.cancel();
+    _ankleSensorSub = null;
     _pulseController.stop();
     _pulseController.reset();
 
+    await _flushDbBuffers();
+
     if (_sessionId != null) {
-      await _db.endSession(_sessionId!, _sampleCount);
+      final totalSamples = _wristSampleCount + _ankleSampleCount;
+      await _db.endSession(_sessionId!, totalSamples);
     }
 
     if (showSnackbar && mounted && _sessionId != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Session saved: $_selectedLabel – $_sampleCount windows.',
+            'Session saved: $_selectedLabel – '
+            'Wrist: $_wristSampleCount windows, Ankle: $_ankleSampleCount windows.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -159,15 +269,26 @@ class _RecordScreenState extends State<RecordScreen>
     }
   }
 
+  String _formatRate(int count) {
+    if (_recordingStartTime == null) return '0/s';
+    final elapsed = DateTime.now().difference(_recordingStartTime!).inSeconds;
+    if (elapsed == 0) return '0/s';
+    return '${(count / elapsed).toStringAsFixed(1)}/s';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Record'),
         actions: [
-          BleStatusIndicator(state: _bleState),
+          _buildBandStatusChip(theme, BandRole.wrist, _wristBleState),
+          const SizedBox(width: 4),
+          _buildBandStatusChip(theme, BandRole.ankle, _ankleBleState),
           const SizedBox(width: 8),
         ],
       ),
@@ -249,10 +370,18 @@ class _RecordScreenState extends State<RecordScreen>
                         ),
                         const Spacer(),
                         Text(
-                          '$_sampleCount windows',
+                          'Wrist: $_wristSampleCount windows (${_formatRate(_wristSampleCount)})',
                           style: theme.textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurfaceVariant,
+                            color: BandRole.wrist.color,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Text(
+                          'Ankle: $_ankleSampleCount windows (${_formatRate(_ankleSampleCount)})',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: BandRole.ankle.color,
                           ),
                         ),
                       ],
@@ -263,13 +392,36 @@ class _RecordScreenState extends State<RecordScreen>
 
             const SizedBox(height: AppTheme.spacingMd),
 
-            // ── Real-time Chart ──
+            // ── Real-time Charts ──
             Expanded(
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-                  child: _chartBuffer.isEmpty
-                      ? Center(
+                  child: Column(
+                    children: [
+                      // Wrist Chart
+                      if (hasWrist) ...[
+                        _buildChartSection(
+                          theme,
+                          'Wrist',
+                          BandRole.wrist.color,
+                          _wristChartBuffer,
+                          _wristBleState,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      // Ankle Chart
+                      if (hasAnkle) ...[
+                        _buildChartSection(
+                          theme,
+                          'Ankle',
+                          BandRole.ankle.color,
+                          _ankleChartBuffer,
+                          _ankleBleState,
+                        ),
+                      ],
+                      if (!hasWrist && !hasAnkle) ...[
+                        Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -283,22 +435,76 @@ class _RecordScreenState extends State<RecordScreen>
                               Text(
                                 _isRecording
                                     ? 'Waiting for data…'
-                                    : 'Start recording to see chart',
+                                    : 'Connect bands and start recording to see charts',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
+                                textAlign: TextAlign.center,
                               ),
                             ],
                           ),
-                        )
-                      : SensorChart(
-                          readings: _chartBuffer,
-                          maxPoints: 50,
                         ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: AppTheme.spacingMd),
+
+            // ── Performance Stats ──
+            if (_isRecording) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppTheme.spacingMd),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Performance',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 8,
+                        children: [
+                          _buildStatChip(
+                            theme,
+                            'Wrist RX',
+                            '$_wristPacketsReceived',
+                            BandRole.wrist.color,
+                          ),
+                          _buildStatChip(
+                            theme,
+                            'Ankle RX',
+                            '$_anklePacketsReceived',
+                            BandRole.ankle.color,
+                          ),
+                          if (_wristMalformedPackets > 0)
+                            _buildStatChip(
+                              theme,
+                              'Wrist Bad',
+                              '$_wristMalformedPackets',
+                              Colors.orange,
+                            ),
+                          if (_ankleMalformedPackets > 0)
+                            _buildStatChip(
+                              theme,
+                              'Ankle Bad',
+                              '$_ankleMalformedPackets',
+                              Colors.orange,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTheme.spacingMd),
+            ],
 
             // ── Start / Stop Button ──
             SizedBox(
@@ -326,6 +532,183 @@ class _RecordScreenState extends State<RecordScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBandStatusChip(
+    ThemeData theme,
+    BandRole role,
+    BandConnectionState state,
+  ) {
+    final (color, label, icon) = switch (state) {
+      BandConnectionState.connected => (
+          role.color,
+          role.displayName,
+          role.icon,
+        ),
+      BandConnectionState.scanning => (
+          Colors.blue,
+          'Scanning',
+          Icons.bluetooth_searching,
+        ),
+      BandConnectionState.connecting => (
+          Colors.orange,
+          'Connecting',
+          Icons.bluetooth,
+        ),
+      BandConnectionState.disconnected => (
+          theme.colorScheme.outline,
+          role.displayName,
+          role.icon,
+        ),
+    };
+
+    return Tooltip(
+      message: '$label: ${state.name}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChartSection(
+    ThemeData theme,
+    String title,
+    Color color,
+    List<model.ImuSample> buffer,
+    BandConnectionState state,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$title (${buffer.length} samples)',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _getStateColor(state).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _getStateLabel(state),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: _getStateColor(state),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 180,
+          child: buffer.isEmpty
+              ? Center(
+                  child: Text(
+                    state == BandConnectionState.connected
+                        ? 'Waiting for data…'
+                        : 'Connect $title band',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : SensorChart(
+                  readings: buffer.map((s) => SensorReading(
+                        ax: s.ax,
+                        ay: s.ay,
+                        az: s.az,
+                        gx: s.gx,
+                        gy: s.gy,
+                        gz: s.gz,
+                        timestamp: s.timestamp,
+                      )).toList(),
+                  maxPoints: 100,
+                  showGyro: true,
+                ),
+        ),
+      ],
+    );
+  }
+
+  Color _getStateColor(BandConnectionState state) => switch (state) {
+        BandConnectionState.connected => Colors.green,
+        BandConnectionState.scanning => Colors.blue,
+        BandConnectionState.connecting => Colors.orange,
+        BandConnectionState.disconnected => Colors.red,
+      };
+
+  String _getStateLabel(BandConnectionState state) => switch (state) {
+        BandConnectionState.connected => 'Connected',
+        BandConnectionState.scanning => 'Scanning',
+        BandConnectionState.connecting => 'Connecting',
+        BandConnectionState.disconnected => 'Disconnected',
+      };
+
+  Widget _buildStatChip(
+    ThemeData theme,
+    String label,
+    String value,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }

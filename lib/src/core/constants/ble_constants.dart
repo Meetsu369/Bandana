@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// BLE and sensor constants for the Bandana HAR system.
 class BleConstants {
   BleConstants._();
@@ -39,4 +41,40 @@ class BleConstants {
     'Climbing Stairs',
     'Descending Stairs',
   ];
+}
+
+/// Physical placement of a Bandana wearable.
+enum BandRole {
+  /// Wrist-worn band.
+  wrist,
+
+  /// Ankle/leg-worn band.
+  ankle;
+
+  /// Display name for UI.
+  String get displayName => switch (this) {
+    BandRole.wrist => 'Wrist',
+    BandRole.ankle => 'Ankle',
+  };
+
+  /// Icon for UI.
+  IconData get icon => switch (this) {
+    BandRole.wrist => Icons.watch,
+    BandRole.ankle => Icons.directions_run,
+  };
+
+  /// Color for UI.
+  Color get color => switch (this) {
+    BandRole.wrist => const Color(0xFF2196F3), // Blue
+    BandRole.ankle => const Color(0xFF4CAF50), // Green
+  };
+}
+
+/// Keys for persistent device assignment storage.
+class AssignmentKeys {
+  AssignmentKeys._();
+  static const String wristDeviceId = 'bandana_wrist_device_id';
+  static const String wristDeviceName = 'bandana_wrist_device_name';
+  static const String ankleDeviceId = 'bandana_ankle_device_id';
+  static const String ankleDeviceName = 'bandana_ankle_device_name';
 }

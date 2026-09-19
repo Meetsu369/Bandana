@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/constants/ble_constants.dart';
+import '../../services/band_assignment_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
 import '../../widgets/activity_card.dart';
-import '../../widgets/ble_status_indicator.dart';
 
 /// Dashboard screen – high-level summary of recorded activities and model status.
 class DashboardScreen extends StatefulWidget {
@@ -22,27 +23,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = getIt<DatabaseService>();
   final _ml = getIt<MlService>();
   final _ble = getIt<BleService>();
+  final _assignment = getIt<BandAssignmentManager>();
 
   Map<String, ({int sessionCount, int totalSamples})> _summaries = {};
   bool _isLoading = true;
   bool _isTraining = false;
   String? _trainingError;
-  StreamSubscription<BleConnectionState>? _bleSub;
-  BleConnectionState _bleState = BleConnectionState.disconnected;
+
+  StreamSubscription<BandConnectionState>? _wristSub;
+  StreamSubscription<BandConnectionState>? _ankleSub;
+  BandConnectionState _wristState = BandConnectionState.disconnected;
+  BandConnectionState _ankleState = BandConnectionState.disconnected;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _bleState = _ble.currentState;
-    _bleSub = _ble.connectionState.listen((state) {
-      if (mounted) setState(() => _bleState = state);
+    _wristState = _ble.wrist.currentState;
+    _ankleState = _ble.ankle.currentState;
+    _wristSub = _ble.wrist.stateStream.listen((state) {
+      if (mounted) setState(() => _wristState = state);
+    });
+    _ankleSub = _ble.ankle.stateStream.listen((state) {
+      if (mounted) setState(() => _ankleState = state);
     });
   }
 
   @override
   void dispose() {
-    _bleSub?.cancel();
+    _wristSub?.cancel();
+    _ankleSub?.cancel();
     super.dispose();
   }
 
@@ -83,7 +93,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       // Run training (computationally intensive for large datasets).
-      final success = _ml.train(data);
+      // Convert to format expected by ML service (features, label only)
+      final trainingData = data.map((d) => (features: d.features, label: d.label)).toList();
+      final success = _ml.train(trainingData);
 
       if (mounted) {
         setState(() {
@@ -126,7 +138,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('Bandana'),
         actions: [
-          BleStatusIndicator(state: _bleState),
+          _buildBandStatusChip(theme, BandRole.wrist, _wristState),
+          const SizedBox(width: 4),
+          _buildBandStatusChip(theme, BandRole.ankle, _ankleState),
           const SizedBox(width: 8),
         ],
       ),
@@ -200,6 +214,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                           ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.spacingMd),
+
+                  // ── Band Status ──
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppTheme.spacingMd),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Band Status',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: AppTheme.spacingSm),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildBandDetail(
+                                  theme,
+                                  BandRole.wrist,
+                                  _wristState,
+                                  _assignment.wristDeviceName,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildBandDetail(
+                                  theme,
+                                  BandRole.ankle,
+                                  _ankleState,
+                                  _assignment.ankleDeviceName,
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -287,6 +343,134 @@ class _DashboardScreenState extends State<DashboardScreen> {
               icon: const Icon(Icons.model_training),
               label: const Text('Train Model'),
             ),
+    );
+  }
+
+  Widget _buildBandStatusChip(
+    ThemeData theme,
+    BandRole role,
+    BandConnectionState state,
+  ) {
+    final (color, label, icon) = switch (state) {
+      BandConnectionState.connected => (role.color, role.displayName, role.icon),
+      BandConnectionState.scanning => (Colors.blue, 'Scanning', Icons.bluetooth_searching),
+      BandConnectionState.connecting => (Colors.orange, 'Connecting', Icons.bluetooth),
+      BandConnectionState.disconnected => (theme.colorScheme.outline, role.displayName, role.icon),
+    };
+
+    return Tooltip(
+      message: '$label: ${state.name}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBandDetail(
+    ThemeData theme,
+    BandRole role,
+    BandConnectionState state,
+    String? deviceName,
+  ) {
+    final stateColor = switch (state) {
+      BandConnectionState.connected => Colors.green,
+      BandConnectionState.scanning => Colors.blue,
+      BandConnectionState.connecting => Colors.orange,
+      BandConnectionState.disconnected => Colors.red,
+    };
+    final stateLabel = switch (state) {
+      BandConnectionState.connected => 'Connected',
+      BandConnectionState.scanning => 'Scanning…',
+      BandConnectionState.connecting => 'Connecting…',
+      BandConnectionState.disconnected => 'Disconnected',
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.spacingMd),
+      decoration: BoxDecoration(
+        color: role.color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: role.color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(role.icon, size: 20, color: role.color),
+              const SizedBox(width: 8),
+              Text(
+                '${role.displayName} Band',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: role.color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: stateColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  stateLabel,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: stateColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          if (deviceName != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              deviceName,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ] else ...[
+            const SizedBox(height: 4),
+            Text(
+              'Not assigned',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

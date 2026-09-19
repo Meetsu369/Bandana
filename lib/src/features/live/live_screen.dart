@@ -5,12 +5,11 @@ import 'package:flutter/material.dart';
 import '../../core/constants/ble_constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/imu_sample.dart';
 import '../../models/prediction_result.dart';
-import '../../models/sensor_data.dart';
 import '../../services/ble_service.dart';
 import '../../services/ml_service.dart';
 import '../../widgets/activity_card.dart';
-import '../../widgets/ble_status_indicator.dart';
 import '../../widgets/confidence_gauge.dart';
 
 /// Live Mode screen – real-time activity classification.
@@ -29,34 +28,46 @@ class _LiveScreenState extends State<LiveScreen> {
   bool _isRunning = false;
   PredictionResult? _currentPrediction;
   final List<PredictionResult> _history = [];
-  final List<SensorReading> _windowBuffer = [];
+  final List<ImuSample> _wristWindowBuffer = [];
+  final List<ImuSample> _ankleWindowBuffer = [];
 
-  StreamSubscription<SensorReading>? _sensorSub;
-  StreamSubscription<BleConnectionState>? _bleSub;
-  BleConnectionState _bleState = BleConnectionState.disconnected;
+  StreamSubscription<ImuSample>? _wristSensorSub;
+  StreamSubscription<ImuSample>? _ankleSensorSub;
+  StreamSubscription<BandConnectionState>? _wristBleSub;
+  StreamSubscription<BandConnectionState>? _ankleBleSub;
+  BandConnectionState _wristBleState = BandConnectionState.disconnected;
+  BandConnectionState _ankleBleState = BandConnectionState.disconnected;
 
   @override
   void initState() {
     super.initState();
-    _bleState = _ble.currentState;
-    _bleSub = _ble.connectionState.listen((state) {
-      if (mounted) setState(() => _bleState = state);
+    _wristBleState = _ble.wrist.currentState;
+    _ankleBleState = _ble.ankle.currentState;
+    _wristBleSub = _ble.wrist.stateStream.listen((state) {
+      if (mounted) setState(() => _wristBleState = state);
+    });
+    _ankleBleSub = _ble.ankle.stateStream.listen((state) {
+      if (mounted) setState(() => _ankleBleState = state);
     });
   }
 
   @override
   void dispose() {
-    _stop();
-    _bleSub?.cancel();
+    _wristSensorSub?.cancel();
+    _ankleSensorSub?.cancel();
+    _wristBleSub?.cancel();
+    _ankleBleSub?.cancel();
     super.dispose();
   }
 
   void _start() {
     if (!_ml.isTrained) return;
-    if (_bleState != BleConnectionState.connected) {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+    if (!hasWrist && !hasAnkle) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Connect to BANDANA_HAR first (Settings tab).'),
+          content: Text('Connect at least one band first.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -64,43 +75,89 @@ class _LiveScreenState extends State<LiveScreen> {
     }
 
     setState(() => _isRunning = true);
-    _sensorSub = _ble.sensorStream.listen(_onSensorData);
+
+    if (hasWrist) {
+      _wristSensorSub = _ble.wrist.sensorStream.listen(_onWristSensorData);
+    }
+    if (hasAnkle) {
+      _ankleSensorSub = _ble.ankle.sensorStream.listen(_onAnkleSensorData);
+    }
   }
 
   void _stop() {
-    _sensorSub?.cancel();
-    _sensorSub = null;
-    _windowBuffer.clear();
+    _wristSensorSub?.cancel();
+    _wristSensorSub = null;
+    _ankleSensorSub?.cancel();
+    _ankleSensorSub = null;
+    _wristWindowBuffer.clear();
+    _ankleWindowBuffer.clear();
     if (mounted) setState(() => _isRunning = false);
   }
 
-  void _onSensorData(SensorReading reading) {
-    _windowBuffer.add(reading);
+  void _onWristSensorData(ImuSample sample) {
+    _wristWindowBuffer.add(sample);
+    _tryPredict();
+  }
 
-    if (_windowBuffer.length >= BleConstants.windowSize) {
-      final window = List<SensorReading>.from(_windowBuffer);
-      _windowBuffer.clear();
+  void _onAnkleSensorData(ImuSample sample) {
+    _ankleWindowBuffer.add(sample);
+    _tryPredict();
+  }
 
-      final result = _ml.predictFromWindow(window);
-      if (result != null && mounted) {
-        setState(() {
-          _currentPrediction = result;
-          _history.insert(0, result);
-          if (_history.length > 20) _history.removeLast();
-        });
-      }
+  void _tryPredict() {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    // Wait for both bands if both connected, otherwise use available one
+    final wristReady = !hasWrist || _wristWindowBuffer.length >= BleConstants.windowSize;
+    final ankleReady = !hasAnkle || _ankleWindowBuffer.length >= BleConstants.windowSize;
+
+    if (!wristReady || !ankleReady) return;
+
+    List<double> features;
+    if (hasWrist && hasAnkle) {
+      // Use combined features (60-dim)
+      final wristWindow = List<ImuSample>.from(_wristWindowBuffer);
+      final ankleWindow = List<ImuSample>.from(_ankleWindowBuffer);
+      _wristWindowBuffer.clear();
+      _ankleWindowBuffer.clear();
+      features = MlService.extractCombinedFeatures(
+        wristWindow: wristWindow,
+        ankleWindow: ankleWindow,
+      );
+    } else if (hasWrist) {
+      final window = List<ImuSample>.from(_wristWindowBuffer);
+      _wristWindowBuffer.clear();
+      features = MlService.extractFeaturesFromImuSamples(window);
+    } else {
+      final window = List<ImuSample>.from(_ankleWindowBuffer);
+      _ankleWindowBuffer.clear();
+      features = MlService.extractFeaturesFromImuSamples(window);
+    }
+
+    final result = _ml.predictFromFeatures(features);
+    if (result != null && mounted) {
+      setState(() {
+        _currentPrediction = result;
+        _history.insert(0, result);
+        if (_history.length > 20) _history.removeLast();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Live'),
         actions: [
-          BleStatusIndicator(state: _bleState),
+          _buildBandStatusChip(theme, BandRole.wrist, _wristBleState),
+          const SizedBox(width: 4),
+          _buildBandStatusChip(theme, BandRole.ankle, _ankleBleState),
           const SizedBox(width: 8),
         ],
       ),
@@ -110,6 +167,28 @@ class _LiveScreenState extends State<LiveScreen> {
               padding: const EdgeInsets.all(AppTheme.spacingMd),
               child: Column(
                 children: [
+                  // ── Band Status Row ──
+                  if (hasWrist || hasAnkle) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppTheme.spacingMd),
+                        child: Row(
+                          children: [
+                            if (hasWrist) ...[
+                              _buildBandInfoChip(theme, BandRole.wrist, _wristBleState),
+                              const SizedBox(width: 8),
+                            ],
+                            if (hasAnkle) ...[
+                              _buildBandInfoChip(theme, BandRole.ankle, _ankleBleState),
+                              const SizedBox(width: 8),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.spacingMd),
+                  ],
+
                   // ── Main prediction display ──
                   Expanded(
                     flex: 3,
@@ -130,9 +209,7 @@ class _LiveScreenState extends State<LiveScreen> {
                     child: FilledButton.icon(
                       onPressed: _isRunning ? _stop : _start,
                       icon: Icon(
-                        _isRunning
-                            ? Icons.stop
-                            : Icons.play_arrow,
+                        _isRunning ? Icons.stop : Icons.play_arrow,
                       ),
                       label: Text(
                         _isRunning ? 'Stop Inference' : 'Start Inference',
@@ -149,8 +226,7 @@ class _LiveScreenState extends State<LiveScreen> {
                             ? theme.colorScheme.onError
                             : theme.colorScheme.onPrimary,
                         shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppTheme.radiusMd),
+                          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                         ),
                       ),
                     ),
@@ -184,8 +260,7 @@ class _LiveScreenState extends State<LiveScreen> {
                             dense: true,
                             leading: Icon(
                               ActivityCard.iconForLabel(pred.label),
-                              color: ActivityCard.colorsForLabel(
-                                  pred.label)[0],
+                              color: ActivityCard.colorsForLabel(pred.label)[0],
                             ),
                             title: Text(pred.label),
                             trailing: Text(
@@ -287,6 +362,71 @@ class _LiveScreenState extends State<LiveScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBandStatusChip(
+    ThemeData theme,
+    BandRole role,
+    BandConnectionState state,
+  ) {
+    final (color, label, icon) = switch (state) {
+      BandConnectionState.connected => (role.color, role.displayName, role.icon),
+      BandConnectionState.scanning => (Colors.blue, 'Scanning', Icons.bluetooth_searching),
+      BandConnectionState.connecting => (Colors.orange, 'Connecting', Icons.bluetooth),
+      BandConnectionState.disconnected => (theme.colorScheme.outline, role.displayName, role.icon),
+    };
+
+    return Tooltip(
+      message: '$label: ${state.name}',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBandInfoChip(ThemeData theme, BandRole role, BandConnectionState state) {
+    final isConnected = state == BandConnectionState.connected;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: role.color.withValues(alpha: isConnected ? 0.2 : 0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: role.color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(role.icon, size: 16, color: role.color),
+          const SizedBox(width: 6),
+          Text(
+            '${role.displayName}: ${isConnected ? 'Connected' : 'Disconnected'}',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: role.color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

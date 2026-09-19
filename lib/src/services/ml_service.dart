@@ -4,6 +4,7 @@ import 'package:ml_algo/ml_algo.dart';
 import 'package:ml_dataframe/ml_dataframe.dart';
 
 import '../core/constants/ble_constants.dart';
+import '../models/imu_sample.dart';
 import '../models/prediction_result.dart';
 import '../models/sensor_data.dart';
 
@@ -51,6 +52,44 @@ class MlService {
     }
 
     return features;
+  }
+
+  /// Extract a feature vector from a window of [ImuSample]s.
+  ///
+  /// For each of the 6 axes, computes: mean, stdDev, variance, min, max.
+  /// Returns a flat list of 30 doubles.
+  static List<double> extractFeaturesFromImuSamples(List<ImuSample> window) {
+    if (window.isEmpty) {
+      return List.filled(BleConstants.featureVectorLength, 0.0);
+    }
+
+    final features = <double>[];
+
+    for (int axis = 0; axis < BleConstants.axisCount; axis++) {
+      final values = window.map((r) => r.toList()[axis]).toList();
+
+      final mean = _mean(values);
+      final std = _stdDev(values, mean);
+      final variance = std * std;
+      final minVal = values.reduce(min);
+      final maxVal = values.reduce(max);
+
+      features.addAll([mean, std, variance, minVal, maxVal]);
+    }
+
+    return features;
+  }
+
+  /// Extract feature vectors from both wrist and ankle windows, concatenated.
+  ///
+  /// Returns a 60-feature vector (30 wrist + 30 ankle).
+  static List<double> extractCombinedFeatures({
+    required List<ImuSample> wristWindow,
+    required List<ImuSample> ankleWindow,
+  }) {
+    final wristFeatures = extractFeaturesFromImuSamples(wristWindow);
+    final ankleFeatures = extractFeaturesFromImuSamples(ankleWindow);
+    return [...wristFeatures, ...ankleFeatures];
   }
 
   // ── Training ──
@@ -102,13 +141,23 @@ class MlService {
 
   // ── Prediction ──
 
-  /// Predict the activity label for a raw sensor window.
+  /// Predict the activity label for a raw sensor window (legacy SensorReading).
   ///
   /// Returns `null` if the model has not been trained.
   PredictionResult? predictFromWindow(List<SensorReading> window) {
     if (!isTrained) return null;
 
     final features = extractFeatures(window);
+    return predictFromFeatures(features);
+  }
+
+  /// Predict the activity label for a raw IMU sample window.
+  ///
+  /// Returns `null` if the model has not been trained.
+  PredictionResult? predictFromImuWindow(List<ImuSample> window) {
+    if (!isTrained) return null;
+
+    final features = extractFeaturesFromImuSamples(window);
     return predictFromFeatures(features);
   }
 
@@ -133,7 +182,7 @@ class MlService {
 
     // KNN doesn't natively provide probability, so we estimate confidence
     // as 1.0 for now. A more sophisticated approach would tally neighbor
-    // votes, but ml_algo's KnnClassifier doesn't expose that directly.
+    /// votes, but ml_algo's KnnClassifier doesn't expose that directly.
     const confidence = 0.85; // Placeholder — could be improved with custom KNN
 
     return PredictionResult(
