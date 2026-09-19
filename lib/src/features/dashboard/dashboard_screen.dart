@@ -67,7 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _trainModel() async {
+  Future<void> _trainModel({bool combined = false}) async {
     setState(() {
       _isTraining = true;
       _trainingError = null;
@@ -95,7 +95,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Run training (computationally intensive for large datasets).
       // Convert to format expected by ML service (features, label only)
       final trainingData = data.map((d) => (features: d.features, label: d.label)).toList();
-      final success = _ml.train(trainingData);
+      final success = combined
+          ? _ml.trainCombined(trainingData)
+          : _ml.trainSingleBand(trainingData);
 
       if (mounted) {
         setState(() {
@@ -105,15 +107,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         });
         if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Model trained! ${_ml.trainedClassCount} classes, '
-                '${_ml.trainedSampleCount} samples.',
+          if (combined) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Combined model trained! ${_ml.trainedClassCountCombined} classes, '
+                  '${_ml.trainedSampleCountCombined} samples.',
+                ),
+                behavior: SnackBarBehavior.floating,
               ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Single-band model trained! ${_ml.trainedClassCount} classes, '
+                  '${_ml.trainedSampleCount} samples.',
+                ),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -161,16 +175,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Row(
                             children: [
                               Icon(
-                                _ml.isTrained
+                                _ml.isTrained || _ml.isCombinedTrained
                                     ? Icons.check_circle
                                     : Icons.model_training,
-                                color: _ml.isTrained
+                                color: _ml.isTrained || _ml.isCombinedTrained
                                     ? Colors.green
                                     : theme.colorScheme.onSurfaceVariant,
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                'ML Model',
+                                'ML Models',
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -179,19 +193,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 12),
                           _buildStatRow(
-                            'Status',
+                            'Single-Band (30 feat)',
                             _ml.isTrained ? 'Trained ✓' : 'Not trained',
                             theme,
                           ),
                           if (_ml.isTrained) ...[
                             _buildStatRow(
-                              'Classes',
+                              'Classes (30-feat)',
                               '${_ml.trainedClassCount}',
                               theme,
                             ),
                             _buildStatRow(
-                              'Training Samples',
+                              'Samples (30-feat)',
                               '${_ml.trainedSampleCount}',
+                              theme,
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          _buildStatRow(
+                            'Combined Dual-Band (60 feat)',
+                            _ml.isCombinedTrained ? 'Trained ✓' : 'Not trained',
+                            theme,
+                          ),
+                          if (_ml.isCombinedTrained) ...[
+                            _buildStatRow(
+                              'Classes (60-feat)',
+                              '${_ml.trainedClassCountCombined}',
+                              theme,
+                            ),
+                            _buildStatRow(
+                              'Samples (60-feat)',
+                              '${_ml.trainedSampleCountCombined}',
                               theme,
                             ),
                           ],
@@ -338,10 +370,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               label: const Text('Training…'),
             )
-          : FloatingActionButton.extended(
-              onPressed: _trainModel,
-              icon: const Icon(Icons.model_training),
-              label: const Text('Train Model'),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.extended(
+                  heroTag: 'train-single',
+                  onPressed: () => _trainModel(combined: false),
+                  icon: const Icon(Icons.model_training),
+                  label: const Text('Train 30-Feat'),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.extended(
+                  heroTag: 'train-combined',
+                  onPressed: () => _trainModel(combined: true),
+                  icon: const Icon(Icons.model_training),
+                  label: const Text('Train 60-Feat'),
+                  backgroundColor: Colors.orange,
+                ),
+              ],
             ),
     );
   }

@@ -64,6 +64,7 @@ class ImuSample {
     required BandRole bandRole,
     required String deviceId,
     required String deviceName,
+    DateTime? timestamp,
   }) {
     try {
       final parts = csv.split(',');
@@ -76,7 +77,7 @@ class ImuSample {
         gx: double.parse(parts[3].trim()),
         gy: double.parse(parts[4].trim()),
         gz: double.parse(parts[5].trim()),
-        timestamp: DateTime.now(),
+        timestamp: timestamp ?? DateTime.now(),
         bandRole: bandRole,
         deviceId: deviceId,
         deviceName: deviceName,

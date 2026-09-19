@@ -205,20 +205,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showDeviceSelectionSheet(BandRole role) async {
-    return showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _DeviceSelectionSheet(
-        role: role,
-        discoveredDevices: _discoveredDevices,
-        isScanning: _isScanningForAssignment,
-        onDeviceSelected: (device) async {
-          await _assignDevice(role, device);
-          Navigator.pop(context);
+      builder: (context) => PopScope(
+        canPop: true,
+        onPopInvoked: (didPop) {
+          if (didPop) {
+            _stopAssignmentScan();
+          }
         },
-        onScanComplete: () {
-          // Called when scan timeout completes
-        },
+        child: _DeviceSelectionSheet(
+          role: role,
+          discoveredDevices: _discoveredDevices,
+          isScanning: _isScanningForAssignment,
+          onDeviceSelected: (device) async {
+            await _assignDevice(role, device);
+            if (context.mounted) Navigator.pop(context);
+          },
+          onScanComplete: () {
+            // Called when scan timeout completes
+          },
+        ),
       ),
     );
   }

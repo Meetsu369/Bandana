@@ -40,6 +40,9 @@ class _RecordScreenState extends State<RecordScreen>
   final List<model.ImuSample> _wristPendingDbWrite = [];
   final List<model.ImuSample> _anklePendingDbWrite = [];
 
+  // Maximum pending writes before we log overflow (prevents unbounded memory growth)
+  static const int _maxPendingWrites = 5000;
+
   StreamSubscription<model.ImuSample>? _wristSensorSub;
   StreamSubscription<model.ImuSample>? _ankleSensorSub;
   StreamSubscription<BandConnectionState>? _wristBleSub;
@@ -56,6 +59,9 @@ class _RecordScreenState extends State<RecordScreen>
   int _wristMalformedPackets = 0;
   int _ankleMalformedPackets = 0;
   DateTime? _recordingStartTime;
+
+  // Flag to prevent DB writes after recording stops
+  bool _recordingStopped = false;
 
   @override
   void initState() {
@@ -79,14 +85,17 @@ class _RecordScreenState extends State<RecordScreen>
 
   Timer? _dbFlushTimer;
   void _startDbFlushTimer() {
+    _dbFlushTimer?.cancel();
     _dbFlushTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      _flushDbBuffers();
+      if (!_recordingStopped) _flushDbBuffers();
     });
   }
 
   Future<void> _flushDbBuffers() async {
     if (_sessionId == null) return;
     if (_wristPendingDbWrite.isEmpty && _anklePendingDbWrite.isEmpty) return;
+    // Don't flush if recording has been stopped
+    if (_recordingStopped) return;
 
     final wristToWrite = List<model.ImuSample>.from(_wristPendingDbWrite);
     final ankleToWrite = List<model.ImuSample>.from(_anklePendingDbWrite);
@@ -101,16 +110,22 @@ class _RecordScreenState extends State<RecordScreen>
 
   @override
   void dispose() {
-    try {
-      _stopRecording(showSnackbar: false);
-    } catch (_) {
-      // Ignore errors during disposal
-    }
+    // Cancel flush timer first to prevent new flushes
+    _dbFlushTimer?.cancel();
+    _dbFlushTimer = null;
+
+    // Prevent any new DB writes
+    _recordingStopped = true;
+
+    // Flush any remaining data (fire and forget - dispose can't be async)
+    _flushDbBuffers();
+
+    // Cancel sensor subscriptions
     _wristSensorSub?.cancel();
     _ankleSensorSub?.cancel();
     _wristBleSub?.cancel();
     _ankleBleSub?.cancel();
-    _dbFlushTimer?.cancel();
+
     _pulseController.dispose();
     super.dispose();
   }
@@ -141,14 +156,20 @@ class _RecordScreenState extends State<RecordScreen>
       _ankleWindowBuffer.clear();
       _wristChartBuffer.clear();
       _ankleChartBuffer.clear();
+      _wristPendingDbWrite.clear();
+      _anklePendingDbWrite.clear();
       _wristPacketsReceived = 0;
       _anklePacketsReceived = 0;
       _wristMalformedPackets = 0;
       _ankleMalformedPackets = 0;
       _recordingStartTime = DateTime.now();
+      _recordingStopped = false; // Reset flag for new recording
     });
 
     _pulseController.repeat(reverse: true);
+
+    // Start flush timer
+    _startDbFlushTimer();
 
     // Subscribe to wrist sensor stream
     if (hasWrist) {
@@ -161,7 +182,7 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   void _onWristSensorData(model.ImuSample sample) {
-    if (!_isRecording) return;
+    if (!_isRecording || _recordingStopped) return;
 
     _wristPacketsReceived++;
     setState(() {
@@ -169,8 +190,14 @@ class _RecordScreenState extends State<RecordScreen>
       if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
     });
 
-    _wristWindowBuffer.add(sample);
+    // Bounded pending writes with overflow logging
+    if (_wristPendingDbWrite.length >= _maxPendingWrites) {
+      debugPrint('Record: Wrist pending DB write buffer overflow (${_wristPendingDbWrite.length} samples), dropping oldest');
+      _wristPendingDbWrite.removeRange(0, _wristPendingDbWrite.length - _maxPendingWrites + 1);
+    }
     _wristPendingDbWrite.add(sample);
+
+    _wristWindowBuffer.add(sample);
 
     if (_wristWindowBuffer.length >= BleConstants.windowSize) {
       _processWristWindow();
@@ -178,7 +205,7 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   void _onAnkleSensorData(model.ImuSample sample) {
-    if (!_isRecording) return;
+    if (!_isRecording || _recordingStopped) return;
 
     _anklePacketsReceived++;
     setState(() {
@@ -186,8 +213,14 @@ class _RecordScreenState extends State<RecordScreen>
       if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
     });
 
-    _ankleWindowBuffer.add(sample);
+    // Bounded pending writes with overflow logging
+    if (_anklePendingDbWrite.length >= _maxPendingWrites) {
+      debugPrint('Record: Ankle pending DB write buffer overflow (${_anklePendingDbWrite.length} samples), dropping oldest');
+      _anklePendingDbWrite.removeRange(0, _anklePendingDbWrite.length - _maxPendingWrites + 1);
+    }
     _anklePendingDbWrite.add(sample);
+
+    _ankleWindowBuffer.add(sample);
 
     if (_ankleWindowBuffer.length >= BleConstants.windowSize) {
       _processAnkleWindow();
@@ -195,7 +228,7 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   Future<void> _processWristWindow() async {
-    if (_sessionId == null) return;
+    if (_sessionId == null || _recordingStopped) return;
 
     final window = List<model.ImuSample>.from(_wristWindowBuffer);
     _wristWindowBuffer.clear();
@@ -215,7 +248,7 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   Future<void> _processAnkleWindow() async {
-    if (_sessionId == null) return;
+    if (_sessionId == null || _recordingStopped) return;
 
     final window = List<model.ImuSample>.from(_ankleWindowBuffer);
     _ankleWindowBuffer.clear();
@@ -235,6 +268,13 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   Future<void> _stopRecording({bool showSnackbar = true}) async {
+    // Prevent new sensor data from being processed
+    _recordingStopped = true;
+
+    // Cancel flush timer to prevent new flushes
+    _dbFlushTimer?.cancel();
+    _dbFlushTimer = null;
+
     _wristSensorSub?.cancel();
     _wristSensorSub = null;
     _ankleSensorSub?.cancel();
@@ -242,6 +282,7 @@ class _RecordScreenState extends State<RecordScreen>
     _pulseController.stop();
     _pulseController.reset();
 
+    // Flush any remaining data (will respect _recordingStopped flag)
     await _flushDbBuffers();
 
     if (_sessionId != null) {

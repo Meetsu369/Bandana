@@ -32,6 +32,10 @@ class BandConnection {
   final _sensorController = StreamController<ImuSample>.broadcast();
   final _stateController = StreamController<BandConnectionState>.broadcast();
 
+  // Connection health tracking
+  DateTime? _lastPacketTime;
+  int _packetCount = 0;
+
   BandConnection({required this.role});
 
   /// Stream of parsed IMU samples from this band.
@@ -48,6 +52,16 @@ class BandConnection {
 
   /// The connected device's remote ID (MAC on Android).
   String? get deviceId => _device?.remoteId.str;
+
+  /// Time of last received packet, or null if no packets received.
+  DateTime? get lastPacketTime => _lastPacketTime;
+
+  /// Total number of packets received since connection.
+  int get packetCount => _packetCount;
+
+  /// Whether the connection is considered stale (no packets for 5 seconds).
+  bool get isStale => _lastPacketTime != null &&
+      DateTime.now().difference(_lastPacketTime!).inSeconds > 5;
 
   /// RSSI of the connected device.
   Future<int?> get rssi async {
@@ -169,6 +183,9 @@ class BandConnection {
       final csv = utf8.decode(value).trim();
       if (csv.isEmpty) return;
 
+      // Use a single timestamp for all lines in this packet
+      final packetTimestamp = DateTime.now();
+
       final lines = csv.split('\n');
       for (final line in lines) {
         final trimmed = line.trim();
@@ -178,12 +195,17 @@ class BandConnection {
             bandRole: role,
             deviceId: _device?.remoteId.str ?? '',
             deviceName: _device?.platformName ?? 'Unknown',
+            timestamp: packetTimestamp,
           );
           if (sample != null) {
             _sensorController.add(sample);
           }
         }
       }
+
+      // Update connection health metrics
+      _lastPacketTime = packetTimestamp;
+      _packetCount++;
     } catch (_) {
       // Silently skip malformed packets
     }
@@ -200,6 +222,8 @@ class BandConnection {
     _notifySubscription = null;
     _connectionSubscription?.cancel();
     _connectionSubscription = null;
+    _lastPacketTime = null;
+    _packetCount = 0;
     _updateState(BandConnectionState.disconnected);
   }
 

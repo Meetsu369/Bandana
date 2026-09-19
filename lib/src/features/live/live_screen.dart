@@ -61,7 +61,7 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 
   void _start() {
-    if (!_ml.isTrained) return;
+    if (!_ml.isTrained && !_ml.isCombinedTrained) return;
     final hasWrist = _wristBleState == BandConnectionState.connected;
     final hasAnkle = _ankleBleState == BandConnectionState.connected;
     if (!hasWrist && !hasAnkle) {
@@ -114,34 +114,48 @@ class _LiveScreenState extends State<LiveScreen> {
 
     if (!wristReady || !ankleReady) return;
 
-    List<double> features;
+    // Use adaptive prediction which selects the appropriate model
+    // based on available bands and trained models.
+    // This uses local snapshots to avoid race conditions with the live buffers.
+    List<ImuSample> wristSnapshot;
+    List<ImuSample> ankleSnapshot;
+
     if (hasWrist && hasAnkle) {
-      // Use combined features (60-dim)
-      final wristWindow = List<ImuSample>.from(_wristWindowBuffer);
-      final ankleWindow = List<ImuSample>.from(_ankleWindowBuffer);
-      _wristWindowBuffer.clear();
-      _ankleWindowBuffer.clear();
-      features = MlService.extractCombinedFeatures(
-        wristWindow: wristWindow,
-        ankleWindow: ankleWindow,
-      );
+      // Take snapshots of both windows, then clear the consumed samples.
+      // This avoids race conditions where the buffers are modified during prediction.
+      wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
+      ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
+
+      // Remove the consumed samples from the buffers.
+      _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
+      _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
     } else if (hasWrist) {
-      final window = List<ImuSample>.from(_wristWindowBuffer);
-      _wristWindowBuffer.clear();
-      features = MlService.extractFeaturesFromImuSamples(window);
+      wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
+      _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
+      ankleSnapshot = [];
     } else {
-      final window = List<ImuSample>.from(_ankleWindowBuffer);
-      _ankleWindowBuffer.clear();
-      features = MlService.extractFeaturesFromImuSamples(window);
+      ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
+      _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
+      wristSnapshot = [];
     }
 
-    final result = _ml.predictFromFeatures(features);
+    // Use adaptive prediction which selects the appropriate model
+    // based on available bands and trained models.
+    final result = _ml.predictAdaptive(
+      wristWindow: wristSnapshot,
+      ankleWindow: ankleSnapshot,
+    );
+
     if (result != null && mounted) {
       setState(() {
         _currentPrediction = result;
         _history.insert(0, result);
         if (_history.length > 20) _history.removeLast();
       });
+    } else if (mounted) {
+      // No prediction available - could be missing model for the current band combination
+      // This is not an error, just no prediction available yet.
+      debugPrint('Live: No prediction available (wrist: ${wristSnapshot.length}, ankle: ${ankleSnapshot.length}, 30-model: ${_ml.isTrained}, 60-model: ${_ml.isCombinedTrained})');
     }
   }
 
@@ -161,12 +175,65 @@ class _LiveScreenState extends State<LiveScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: !_ml.isTrained
+      body: (!_ml.isTrained && !_ml.isCombinedTrained)
           ? _buildNotTrainedView(theme)
           : Padding(
               padding: const EdgeInsets.all(AppTheme.spacingMd),
               child: Column(
                 children: [
+                  // ── Band Status Row ──
+                  if (hasWrist || hasAnkle) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppTheme.spacingMd),
+                        child: Row(
+                          children: [
+                            if (hasWrist) ...[
+                              _buildBandInfoChip(theme, BandRole.wrist, _wristBleState),
+                              const SizedBox(width: 8),
+                            ],
+                            if (hasAnkle) ...[
+                              _buildBandInfoChip(theme, BandRole.ankle, _ankleBleState),
+                              const SizedBox(width: 8),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.spacingMd),
+                  ],
+
+                  // ── Model Status Indicator ──
+                  if (_ml.isCombinedTrained || _ml.isTrained) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppTheme.spacingMd),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _ml.isCombinedTrained ? Icons.check_circle : Icons.warning_amber,
+                              color: _ml.isCombinedTrained ? Colors.green : Colors.orange,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _ml.isCombinedTrained
+                                    ? 'Dual-band model ready (60 features)'
+                                    : 'Single-band model ready (30 features)\nDual-band model not trained — using fallback',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: _ml.isCombinedTrained
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.spacingMd),
+                  ],
+
                   // ── Band Status Row ──
                   if (hasWrist || hasAnkle) ...[
                     Card(
@@ -277,7 +344,7 @@ class _LiveScreenState extends State<LiveScreen> {
                 ],
               ),
             ),
-    );
+      );
   }
 
   Widget _buildNotTrainedView(ThemeData theme) {

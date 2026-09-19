@@ -12,23 +12,43 @@ import '../models/sensor_data.dart';
 ///
 /// Handles feature extraction from raw sensor windows,
 /// KNN classifier training, and real-time prediction.
+/// Supports both single-band (30 features) and dual-band combined (60 features) models.
 class MlService {
-  KnnClassifier? _classifier;
-  int _trainedSampleCount = 0;
-  int _trainedClassCount = 0;
+  // Single-band model (30 features)
+  KnnClassifier? _classifier30;
+  int _trainedSampleCount30 = 0;
+  int _trainedClassCount30 = 0;
 
-  /// Whether a model has been trained and is ready for prediction.
-  bool get isTrained => _classifier != null;
+  // Combined dual-band model (60 features)
+  KnnClassifier? _classifier60;
+  int _trainedSampleCount60 = 0;
+  int _trainedClassCount60 = 0;
 
-  /// Number of training samples used in the current model.
-  int get trainedSampleCount => _trainedSampleCount;
+  /// Whether a single-band (30-feature) model has been trained.
+  bool get isTrained => _classifier30 != null;
 
-  /// Number of distinct activity classes in the current model.
-  int get trainedClassCount => _trainedClassCount;
+  /// Whether a combined dual-band (60-feature) model has been trained.
+  bool get isCombinedTrained => _classifier60 != null;
+
+  /// Number of training samples used in the single-band model.
+  int get trainedSampleCount => _trainedSampleCount30;
+
+  /// Number of distinct activity classes in the single-band model.
+  int get trainedClassCount => _trainedClassCount30;
+
+  /// Number of training samples used in the combined dual-band model.
+  int get trainedSampleCountCombined => _trainedSampleCount60;
+
+  /// Number of distinct activity classes in the combined dual-band model.
+  int get trainedClassCountCombined => _trainedClassCount60;
+
+  // Expected feature vector lengths
+  static const int singleBandFeatureLength = BleConstants.featureVectorLength; // 30
+  static const int combinedFeatureLength = BleConstants.featureVectorLength * 2; // 60
 
   // ── Feature Extraction ──
 
-  /// Extract a feature vector from a window of [SensorReading]s.
+  /// Extract a feature vector from a window of [SensorReading]s (legacy).
   ///
   /// For each of the 6 axes, computes: mean, stdDev, variance, min, max.
   /// Returns a flat list of 30 doubles.
@@ -92,28 +112,40 @@ class MlService {
     return [...wristFeatures, ...ankleFeatures];
   }
 
+  // ── Feature Vector Validation ──
+
+  /// Validate feature vector length for single-band prediction.
+  static void _validateSingleBandFeatures(List<double> features) {
+    if (features.length != singleBandFeatureLength) {
+      throw ArgumentError(
+        'Single-band feature vector must have exactly $singleBandFeatureLength features, got ${features.length}',
+      );
+    }
+  }
+
+  /// Validate feature vector length for combined dual-band prediction.
+  static void _validateCombinedFeatures(List<double> features) {
+    if (features.length != combinedFeatureLength) {
+      throw ArgumentError(
+        'Combined dual-band feature vector must have exactly $combinedFeatureLength features, got ${features.length}',
+      );
+    }
+  }
+
   // ── Training ──
 
-  /// Train a KNN classifier from labeled feature windows.
+  /// Train a single-band (30-feature) KNN classifier from labeled feature windows.
   ///
   /// [trainingData] is a list of (featureVector, label) pairs loaded
-  /// from the database.
+  /// from the database. Each feature vector must be 30 features.
   ///
   /// Returns `true` if training succeeded, `false` if insufficient data.
-  bool train(List<({List<double> features, String label})> trainingData) {
-    if (trainingData.length < 2) {
-      return false;
-    }
-
-    // Check that we have at least 2 distinct labels.
-    final labels = trainingData.map((d) => d.label).toSet();
-    if (labels.length < 2) {
-      return false;
-    }
+  bool trainSingleBand(List<({List<double> features, String label})> trainingData) {
+    _validateTrainingData(trainingData, singleBandFeatureLength);
 
     // Build column headers: f0, f1, ..., f29, label
     final headers = <String>[
-      for (int i = 0; i < BleConstants.featureVectorLength; i++) 'f$i',
+      for (int i = 0; i < singleBandFeatureLength; i++) 'f$i',
       'label',
     ];
 
@@ -132,11 +164,70 @@ class MlService {
     final k = max(3, min(11, sqrt(trainingData.length).floor()));
 
     // Fit the classifier.
-    _classifier = KnnClassifier(dataFrame, 'label', k);
-    _trainedSampleCount = trainingData.length;
-    _trainedClassCount = labels.length;
+    _classifier30 = KnnClassifier(dataFrame, 'label', k);
+    _trainedSampleCount30 = trainingData.length;
+    _trainedClassCount30 = trainingData.map((d) => d.label).toSet().length;
 
     return true;
+  }
+
+  /// Train a combined dual-band (60-feature) KNN classifier.
+  ///
+  /// [trainingData] is a list of (featureVector, label) pairs.
+  /// Each feature vector must be exactly 60 features (30 wrist + 30 ankle).
+  ///
+  /// Returns `true` if training succeeded, `false` if insufficient data.
+  bool trainCombined(List<({List<double> features, String label})> trainingData) {
+    _validateTrainingData(trainingData, combinedFeatureLength);
+
+    // Build column headers: f0, f1, ..., f59, label
+    final headers = <String>[
+      for (int i = 0; i < combinedFeatureLength; i++) 'f$i',
+      'label',
+    ];
+
+    // Build data rows.
+    final rows = trainingData.map((d) {
+      return <dynamic>[...d.features, d.label];
+    }).toList();
+
+    // Create DataFrame.
+    final dataFrame = DataFrame(
+      [headers, ...rows],
+      headerExists: true,
+    );
+
+    // Determine k: use sqrt(n) clamped to a reasonable range.
+    final k = max(3, min(11, sqrt(trainingData.length).floor()));
+
+    // Fit the classifier.
+    _classifier60 = KnnClassifier(dataFrame, 'label', k);
+    _trainedSampleCount60 = trainingData.length;
+    _trainedClassCount60 = trainingData.map((d) => d.label).toSet().length;
+
+    return true;
+  }
+
+  void _validateTrainingData(
+    List<({List<double> features, String label})> trainingData,
+    int expectedFeatureLength,
+  ) {
+    if (trainingData.length < 2) {
+      throw ArgumentError('Need at least 2 training samples');
+    }
+
+    final labels = trainingData.map((d) => d.label).toSet();
+    if (labels.length < 2) {
+      throw ArgumentError('Need at least 2 distinct labels');
+    }
+
+    for (final d in trainingData) {
+      if (d.features.length != expectedFeatureLength) {
+        throw ArgumentError(
+          'Training feature vector must have exactly $expectedFeatureLength features, got ${d.features.length}',
+        );
+      }
+    }
   }
 
   // ── Prediction ──
@@ -148,26 +239,30 @@ class MlService {
     if (!isTrained) return null;
 
     final features = extractFeatures(window);
-    return predictFromFeatures(features);
+    _validateSingleBandFeatures(features);
+    return predictFromFeatures30(features);
   }
 
-  /// Predict the activity label for a raw IMU sample window.
+  /// Predict the activity label for a raw IMU sample window (single-band, 30 features).
   ///
   /// Returns `null` if the model has not been trained.
   PredictionResult? predictFromImuWindow(List<ImuSample> window) {
     if (!isTrained) return null;
 
     final features = extractFeaturesFromImuSamples(window);
-    return predictFromFeatures(features);
+    _validateSingleBandFeatures(features);
+    return predictFromFeatures30(features);
   }
 
-  /// Predict from an already-extracted feature vector.
-  PredictionResult? predictFromFeatures(List<double> features) {
-    if (!isTrained || _classifier == null) return null;
+  /// Predict from a 30-feature vector using the single-band model.
+  PredictionResult? predictFromFeatures30(List<double> features) {
+    if (!isTrained || _classifier30 == null) return null;
+
+    _validateSingleBandFeatures(features);
 
     // Build a single-row DataFrame for prediction (without the label column).
     final headers = <String>[
-      for (int i = 0; i < BleConstants.featureVectorLength; i++) 'f$i',
+      for (int i = 0; i < singleBandFeatureLength; i++) 'f$i',
     ];
 
     final dataFrame = DataFrame(
@@ -175,14 +270,14 @@ class MlService {
       headerExists: true,
     );
 
-    final prediction = _classifier!.predict(dataFrame);
+    final prediction = _classifier30!.predict(dataFrame);
 
     // Extract the predicted label from the result DataFrame.
     final predictedLabel = prediction.rows.first.last.toString();
 
     // KNN doesn't natively provide probability, so we estimate confidence
     // as 1.0 for now. A more sophisticated approach would tally neighbor
-    /// votes, but ml_algo's KnnClassifier doesn't expose that directly.
+    // votes, but ml_algo's KnnClassifier doesn't expose that directly.
     const confidence = 0.85; // Placeholder — could be improved with custom KNN
 
     return PredictionResult(
@@ -191,11 +286,80 @@ class MlService {
     );
   }
 
-  /// Reset the model.
+  /// Predict from a 60-feature vector using the combined dual-band model.
+  ///
+  /// Returns `null` if the combined model has not been trained.
+  PredictionResult? predictFromFeatures60(List<double> features) {
+    if (!isCombinedTrained || _classifier60 == null) return null;
+
+    _validateCombinedFeatures(features);
+
+    // Build a single-row DataFrame for prediction (without the label column).
+    final headers = <String>[
+      for (int i = 0; i < combinedFeatureLength; i++) 'f$i',
+    ];
+
+    final dataFrame = DataFrame(
+      [headers, features],
+      headerExists: true,
+    );
+
+    final prediction = _classifier60!.predict(dataFrame);
+
+    // Extract the predicted label from the result DataFrame.
+    final predictedLabel = prediction.rows.first.last.toString();
+
+    const confidence = 0.85; // Placeholder
+
+    return PredictionResult(
+      label: predictedLabel,
+      confidence: confidence,
+    );
+  }
+
+  /// Predict using the appropriate model based on available bands.
+  ///
+  /// If both bands are available and combined model exists, uses 60-feature model.
+  /// Otherwise falls back to single-band model if available.
+  PredictionResult? predictAdaptive({
+    required List<ImuSample> wristWindow,
+    required List<ImuSample> ankleWindow,
+  }) {
+    final hasWrist = wristWindow.isNotEmpty;
+    final hasAnkle = ankleWindow.isNotEmpty;
+
+    if (hasWrist && hasAnkle && isCombinedTrained) {
+      final features = extractCombinedFeatures(
+        wristWindow: wristWindow,
+        ankleWindow: ankleWindow,
+      );
+      return predictFromFeatures60(features);
+    } else if (hasWrist && isTrained) {
+      final features = extractFeaturesFromImuSamples(wristWindow);
+      return predictFromFeatures30(features);
+    } else if (hasAnkle && isTrained) {
+      final features = extractFeaturesFromImuSamples(ankleWindow);
+      return predictFromFeatures30(features);
+    }
+    return null;
+  }
+
+  // Legacy method for backward compatibility.
+  PredictionResult? predictFromFeatures(List<double> features) {
+    if (!isTrained || _classifier30 == null) return null;
+
+    _validateSingleBandFeatures(features);
+    return predictFromFeatures30(features);
+  }
+
+  /// Reset both models.
   void reset() {
-    _classifier = null;
-    _trainedSampleCount = 0;
-    _trainedClassCount = 0;
+    _classifier30 = null;
+    _trainedSampleCount30 = 0;
+    _trainedClassCount30 = 0;
+    _classifier60 = null;
+    _trainedSampleCount60 = 0;
+    _trainedClassCount60 = 0;
   }
 
   // ── Private Helpers ──
