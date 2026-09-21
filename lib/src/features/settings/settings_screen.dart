@@ -210,7 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isScrollControlled: true,
       builder: (context) => PopScope(
         canPop: true,
-        onPopInvoked: (didPop) {
+        onPopInvokedWithResult: (didPop, _) {
           if (didPop) {
             _stopAssignmentScan();
           }

@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:ml_algo/ml_algo.dart';
 import 'package:ml_dataframe/ml_dataframe.dart';
 
@@ -141,7 +142,9 @@ class MlService {
   ///
   /// Returns `true` if training succeeded, `false` if insufficient data.
   bool trainSingleBand(List<({List<double> features, String label})> trainingData) {
-    _validateTrainingData(trainingData, singleBandFeatureLength);
+    if (!_validateTrainingData(trainingData, singleBandFeatureLength)) {
+      return false;
+    }
 
     // Build column headers: f0, f1, ..., f29, label
     final headers = <String>[
@@ -178,7 +181,9 @@ class MlService {
   ///
   /// Returns `true` if training succeeded, `false` if insufficient data.
   bool trainCombined(List<({List<double> features, String label})> trainingData) {
-    _validateTrainingData(trainingData, combinedFeatureLength);
+    if (!_validateTrainingData(trainingData, combinedFeatureLength)) {
+      return false;
+    }
 
     // Build column headers: f0, f1, ..., f59, label
     final headers = <String>[
@@ -208,26 +213,29 @@ class MlService {
     return true;
   }
 
-  void _validateTrainingData(
+  bool _validateTrainingData(
     List<({List<double> features, String label})> trainingData,
     int expectedFeatureLength,
   ) {
     if (trainingData.length < 2) {
-      throw ArgumentError('Need at least 2 training samples');
+      debugPrint('ML: Training rejected - need at least 2 samples, got ${trainingData.length}');
+      return false;
     }
 
     final labels = trainingData.map((d) => d.label).toSet();
     if (labels.length < 2) {
-      throw ArgumentError('Need at least 2 distinct labels');
+      debugPrint('ML: Training rejected - need at least 2 distinct labels, got ${labels.length}');
+      return false;
     }
 
     for (final d in trainingData) {
       if (d.features.length != expectedFeatureLength) {
-        throw ArgumentError(
-          'Training feature vector must have exactly $expectedFeatureLength features, got ${d.features.length}',
-        );
+        debugPrint('ML: Training rejected - feature vector must have exactly $expectedFeatureLength features, got ${d.features.length}');
+        return false;
       }
     }
+
+    return true;
   }
 
   // ── Prediction ──
@@ -275,14 +283,13 @@ class MlService {
     // Extract the predicted label from the result DataFrame.
     final predictedLabel = prediction.rows.first.last.toString();
 
-    // KNN doesn't natively provide probability, so we estimate confidence
-    // as 1.0 for now. A more sophisticated approach would tally neighbor
-    // votes, but ml_algo's KnnClassifier doesn't expose that directly.
-    const confidence = 0.85; // Placeholder — could be improved with custom KNN
+    // Confidence is not available from the current KNN implementation.
+    // ml_algo's KnnClassifier does not expose neighbor vote information.
+    // This field will be null until a proper confidence estimation is implemented.
 
     return PredictionResult(
       label: predictedLabel,
-      confidence: confidence,
+      confidence: null,
     );
   }
 
@@ -309,18 +316,22 @@ class MlService {
     // Extract the predicted label from the result DataFrame.
     final predictedLabel = prediction.rows.first.last.toString();
 
-    const confidence = 0.85; // Placeholder
+    // Confidence is not available from the current KNN implementation.
+    // ml_algo's KnnClassifier does not expose neighbor vote information.
+    // This field will be null until a proper confidence estimation is implemented.
 
     return PredictionResult(
       label: predictedLabel,
-      confidence: confidence,
+      confidence: null,
     );
   }
 
   /// Predict using the appropriate model based on available bands.
   ///
   /// If both bands are available and combined model exists, uses 60-feature model.
-  /// Otherwise falls back to single-band model if available.
+  /// Otherwise uses single-band model if available and only one band is connected.
+  /// Returns null if both bands are connected but combined model is not trained
+  /// (to avoid presenting single-band predictions as dual-band predictions).
   PredictionResult? predictAdaptive({
     required List<ImuSample> wristWindow,
     required List<ImuSample> ankleWindow,
@@ -328,19 +339,30 @@ class MlService {
     final hasWrist = wristWindow.isNotEmpty;
     final hasAnkle = ankleWindow.isNotEmpty;
 
+    // Case A: Both bands connected AND combined model trained → 60-feature prediction
     if (hasWrist && hasAnkle && isCombinedTrained) {
       final features = extractCombinedFeatures(
         wristWindow: wristWindow,
         ankleWindow: ankleWindow,
       );
       return predictFromFeatures60(features);
-    } else if (hasWrist && isTrained) {
+    }
+
+    // Case B: Both bands connected but NO combined model → NO fallback prediction
+    // Returning null prevents presenting single-band predictions as dual-band predictions.
+    if (hasWrist && hasAnkle && !isCombinedTrained) {
+      return null;
+    }
+
+    // Case C: Only one band available → single-band prediction (30 features)
+    if (hasWrist && isTrained) {
       final features = extractFeaturesFromImuSamples(wristWindow);
       return predictFromFeatures30(features);
     } else if (hasAnkle && isTrained) {
       final features = extractFeaturesFromImuSamples(ankleWindow);
       return predictFromFeatures30(features);
     }
+
     return null;
   }
 

@@ -219,7 +219,7 @@ class _LiveScreenState extends State<LiveScreen> {
                               child: Text(
                                 _ml.isCombinedTrained
                                     ? 'Dual-band model ready (60 features)'
-                                    : 'Single-band model ready (30 features)\nDual-band model not trained — using fallback',
+                                    : 'Single-band model ready (30 features)\nDual-band model not trained — 60-feature model unavailable',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: _ml.isCombinedTrained
                                       ? Colors.green
@@ -382,6 +382,20 @@ class _LiveScreenState extends State<LiveScreen> {
   }
 
   Widget _buildWaitingView(ThemeData theme) {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+    final bothConnected = hasWrist && hasAnkle;
+    final combinedTrained = _ml.isCombinedTrained;
+
+    String message;
+    if (bothConnected && !combinedTrained) {
+      message = 'Dual-band model not trained.\nCollect data from both bands and train 60-feature model.';
+    } else if (!_ml.isTrained && !_ml.isCombinedTrained) {
+      message = 'No model trained. Record data and train a model first.';
+    } else {
+      message = _isRunning ? 'Waiting for data…' : 'Press Start to begin';
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -395,10 +409,11 @@ class _LiveScreenState extends State<LiveScreen> {
         ),
         const SizedBox(height: 16),
         Text(
-          _isRunning ? 'Waiting for data…' : 'Press Start to begin',
+          message,
           style: theme.textTheme.bodyLarge?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
+          textAlign: TextAlign.center,
         ),
       ],
     );

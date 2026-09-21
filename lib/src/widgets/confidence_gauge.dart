@@ -5,9 +5,10 @@ import 'package:flutter/material.dart';
 /// Animated circular gauge that displays prediction confidence (0.0–1.0).
 ///
 /// Transitions smoothly between values and shifts color from red → yellow → green.
+/// If confidence is null, displays "N/A" instead of a percentage.
 class ConfidenceGauge extends StatelessWidget {
-  /// Confidence value between 0.0 and 1.0.
-  final double confidence;
+  /// Confidence value between 0.0 and 1.0, or null if unavailable.
+  final double? confidence;
 
   /// Diameter of the gauge.
   final double size;
@@ -20,7 +21,7 @@ class ConfidenceGauge extends StatelessWidget {
 
   const ConfidenceGauge({
     super.key,
-    required this.confidence,
+    this.confidence,
     this.size = 160,
     this.strokeWidth = 10,
     this.child,
@@ -48,9 +49,10 @@ class ConfidenceGauge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final clampedConfidence = confidence.clamp(0.0, 1.0);
-    final color = _colorForConfidence(clampedConfidence);
-    final percent = (clampedConfidence * 100).round();
+    final hasConfidence = confidence != null;
+    final clampedConfidence = hasConfidence ? confidence!.clamp(0.0, 1.0) : 0.0;
+    final color = hasConfidence ? _colorForConfidence(clampedConfidence) : theme.colorScheme.onSurfaceVariant;
+    final percent = hasConfidence ? (clampedConfidence * 100).round() : null;
 
     return SizedBox(
       width: size,
@@ -62,29 +64,30 @@ class ConfidenceGauge extends StatelessWidget {
           SizedBox.expand(
             child: CustomPaint(
               painter: _GaugePainter(
-                progress: 1.0,
+                progress: hasConfidence ? 1.0 : 0.0,
                 color: theme.colorScheme.surfaceContainerHighest,
                 strokeWidth: strokeWidth,
               ),
             ),
           ),
-          // Animated foreground arc
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: clampedConfidence),
-            duration: const Duration(milliseconds: 600),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, _) {
-              return SizedBox.expand(
-                child: CustomPaint(
-                  painter: _GaugePainter(
-                    progress: value,
-                    color: _colorForConfidence(value),
-                    strokeWidth: strokeWidth,
+          // Animated foreground arc (only shown when confidence is available)
+          if (hasConfidence)
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: clampedConfidence),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, _) {
+                return SizedBox.expand(
+                  child: CustomPaint(
+                    painter: _GaugePainter(
+                      progress: value,
+                      color: _colorForConfidence(value),
+                      strokeWidth: strokeWidth,
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            ),
           // Center content
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -94,7 +97,7 @@ class ConfidenceGauge extends StatelessWidget {
                 const SizedBox(height: 4),
               ],
               Text(
-                '$percent%',
+                percent != null ? '$percent%' : 'N/A',
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: color,
