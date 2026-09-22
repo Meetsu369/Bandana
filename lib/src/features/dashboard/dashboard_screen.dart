@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/ble_constants.dart';
+import '../../features/record/session_detail_screen.dart';
 import '../../services/band_assignment_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
@@ -26,6 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _assignment = getIt<BandAssignmentManager>();
 
   Map<String, ({int sessionCount, int totalSamples})> _summaries = {};
+  List<Session> _sessions = [];
   bool _isLoading = true;
   bool _isTraining = false;
   String? _trainingError;
@@ -59,9 +61,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final summaries = await _db.getSessionSummaries();
+    final sessions = await _db.getAllSessions();
     if (mounted) {
       setState(() {
         _summaries = summaries;
+        _sessions = sessions;
         _isLoading = false;
       });
     }
@@ -356,6 +360,100 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       },
                     ),
+
+                   // ── Session List ──
+                   const SizedBox(height: AppTheme.spacingMd),
+                   Text(
+                     'All Sessions',
+                     style: theme.textTheme.titleSmall?.copyWith(
+                       fontWeight: FontWeight.w600,
+                       color: theme.colorScheme.onSurfaceVariant,
+                     ),
+                   ),
+                   const SizedBox(height: AppTheme.spacingSm),
+                   if (_sessions.isEmpty)
+                     Card(
+                       child: Padding(
+                         padding: const EdgeInsets.all(AppTheme.spacingLg),
+                         child: Column(
+                           children: [
+                             Icon(
+                               Icons.history,
+                               size: 48,
+                               color: theme.colorScheme.onSurfaceVariant,
+                             ),
+                             const SizedBox(height: 12),
+                             Text(
+                               'No sessions yet',
+                               style: theme.textTheme.bodyLarge?.copyWith(
+                                 color: theme.colorScheme.onSurfaceVariant,
+                               ),
+                             ),
+                             const SizedBox(height: 4),
+                             Text(
+                               'Start recording to create sessions.',
+                               style: theme.textTheme.bodySmall?.copyWith(
+                                 color: theme.colorScheme.onSurfaceVariant,
+                               ),
+                               textAlign: TextAlign.center,
+                             ),
+                           ],
+                         ),
+                       ),
+                     )
+                   else
+                     ListView.separated(
+                       shrinkWrap: true,
+                       physics: const NeverScrollableScrollPhysics(),
+                       itemCount: _sessions.length,
+                       separatorBuilder: (_, __) => const Divider(height: 1),
+                       itemBuilder: (context, index) {
+                         final session = _sessions[index];
+                         final duration = session.endTime != null
+                             ? session.endTime!.difference(session.startTime)
+                             : DateTime.now().difference(session.startTime);
+                         final hours = duration.inHours;
+                         final minutes = duration.inMinutes % 60;
+                         final seconds = duration.inSeconds % 60;
+                         String durationStr;
+                         if (hours > 0) {
+                           durationStr = '${hours}h ${minutes}m ${seconds}s';
+                         } else if (minutes > 0) {
+                           durationStr = '${minutes}m ${seconds}s';
+                         } else {
+                           durationStr = '${seconds}s';
+                         }
+                         final dateStr =
+                             '${session.startTime.year}-${session.startTime.month.toString().padLeft(2, '0')}-${session.startTime.day.toString().padLeft(2, '0')} '
+                             '${session.startTime.hour.toString().padLeft(2, '0')}:${session.startTime.minute.toString().padLeft(2, '0')}';
+                         return ListTile(
+                           dense: true,
+                           leading: CircleAvatar(
+                             backgroundColor: theme.colorScheme.primaryContainer,
+                             child: Text(
+                               session.id.toString(),
+                               style: theme.textTheme.labelMedium?.copyWith(
+                                 color: theme.colorScheme.onPrimaryContainer,
+                                 fontWeight: FontWeight.w600,
+                               ),
+                             ),
+                           ),
+                           title: Text(session.label),
+                           subtitle: Text(
+                             '$dateStr  •  $durationStr  •  ${session.sampleCount} windows',
+                             style: theme.textTheme.bodySmall?.copyWith(
+                               color: theme.colorScheme.onSurfaceVariant,
+                             ),
+                           ),
+                           trailing: const Icon(Icons.chevron_right),
+                           onTap: () => Navigator.of(context).push(
+                             MaterialPageRoute(
+                               builder: (_) => SessionDetailScreen(sessionId: session.id),
+                             ),
+                           ),
+                         );
+                       },
+                     ),
                 ],
               ),
       ),

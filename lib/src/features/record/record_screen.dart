@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/ble_constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../features/record/session_detail_screen.dart';
 import '../../models/imu_sample.dart' as model;
 import '../../models/sensor_data.dart';
 import '../../services/ble_service.dart';
@@ -27,6 +28,7 @@ class _RecordScreenState extends State<RecordScreen>
 
   // ── Recording state ──
   String _selectedLabel = BleConstants.defaultLabels.first;
+  String _sessionNotes = '';
   bool _isRecording = false;
   int? _sessionId;
   int _wristSampleCount = 0;
@@ -146,6 +148,11 @@ class _RecordScreenState extends State<RecordScreen>
 
     // Create a new session in the DB.
     final sessionId = await _db.createSession(_selectedLabel);
+
+    // Save notes if provided
+    if (_sessionNotes.isNotEmpty) {
+      await _db.updateSessionNotes(sessionId, _sessionNotes);
+    }
 
     setState(() {
       _isRecording = true;
@@ -285,12 +292,15 @@ class _RecordScreenState extends State<RecordScreen>
     // Flush any remaining data (will respect _recordingStopped flag)
     await _flushDbBuffers();
 
-    if (_sessionId != null) {
+    // Capture sessionId before clearing state
+    final completedSessionId = _sessionId;
+
+    if (completedSessionId != null) {
       final totalSamples = _wristSampleCount + _ankleSampleCount;
-      await _db.endSession(_sessionId!, totalSamples);
+      await _db.endSession(completedSessionId, totalSamples);
     }
 
-    if (showSnackbar && mounted && _sessionId != null) {
+    if (showSnackbar && mounted && completedSessionId != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -306,7 +316,17 @@ class _RecordScreenState extends State<RecordScreen>
       setState(() {
         _isRecording = false;
         _sessionId = null;
+        _sessionNotes = '';
       });
+    }
+
+    // Navigate to session detail screen
+    if (mounted && completedSessionId != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SessionDetailScreen(sessionId: completedSessionId),
+        ),
+      );
     }
   }
 
@@ -378,6 +398,49 @@ class _RecordScreenState extends State<RecordScreen>
             ),
             const SizedBox(height: AppTheme.spacingMd),
 
+            // ── Session Notes (optional) ──
+            if (!_isRecording)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppTheme.spacingMd),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.notes_outlined,
+                            color: theme.colorScheme.primary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Session Notes (Optional)',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.spacingSm),
+                      TextField(
+                        maxLines: 2,
+                        decoration: InputDecoration(
+                          hintText: 'Add context about this recording session...',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                          ),
+                          contentPadding: const EdgeInsets.all(AppTheme.spacingMd),
+                          isDense: true,
+                        ),
+                        onChanged: (value) => _sessionNotes = value,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (!_isRecording) const SizedBox(height: AppTheme.spacingMd),
+
             // ── Stats Bar ──
             if (_isRecording)
               AnimatedBuilder(
@@ -394,36 +457,55 @@ class _RecordScreenState extends State<RecordScreen>
                       ),
                       borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Column(
                       children: [
-                        Icon(
-                          Icons.fiber_manual_record,
-                          color: theme.colorScheme.error,
-                          size: 14,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.fiber_manual_record,
+                              color: theme.colorScheme.error,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Recording: $_selectedLabel',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Recording: $_selectedLabel',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+                        if (_sessionId != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Session ID: $_sessionId',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontFamily: 'monospace',
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          'Wrist: $_wristSampleCount windows (${_formatRate(_wristSampleCount)})',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: BandRole.wrist.color,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Text(
-                          'Ankle: $_ankleSampleCount windows (${_formatRate(_ankleSampleCount)})',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: BandRole.ankle.color,
-                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Wrist: $_wristSampleCount windows (${_formatRate(_wristSampleCount)})',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w500,
+                                color: BandRole.wrist.color,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Text(
+                              'Ankle: $_ankleSampleCount windows (${_formatRate(_ankleSampleCount)})',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w500,
+                                color: BandRole.ankle.color,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

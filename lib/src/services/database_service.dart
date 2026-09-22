@@ -20,6 +20,7 @@ class Sessions extends Table {
   DateTimeColumn get startTime => dateTime()();
   DateTimeColumn get endTime => dateTime().nullable()();
   IntColumn get sampleCount => integer().withDefault(const Constant(0))();
+  TextColumn get notes => text().nullable()();
 }
 
 /// Individual IMU samples stored for each band during recording.
@@ -58,7 +59,7 @@ class DatabaseService extends _$DatabaseService {
   DatabaseService() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -70,6 +71,10 @@ class DatabaseService extends _$DatabaseService {
             // Create new tables for dual-band support
             await m.createTable(imuSampleRecords);
             await m.addColumn(sensorWindows, sensorWindows.bandRole);
+          }
+          if (from < 3) {
+            // Add notes column to sessions table
+            await m.addColumn(sessions, sessions.notes);
           }
         },
       );
@@ -94,6 +99,13 @@ class DatabaseService extends _$DatabaseService {
         endTime: Value(DateTime.now()),
         sampleCount: Value(sampleCount),
       ),
+    );
+  }
+
+  /// Update session notes.
+  Future<void> updateSessionNotes(int sessionId, String notes) async {
+    await (update(sessions)..where((s) => s.id.equals(sessionId))).write(
+      SessionsCompanion(notes: Value(notes)),
     );
   }
 
@@ -193,6 +205,70 @@ class DatabaseService extends _$DatabaseService {
     query.where(imuSampleRecords.sessionId.equals(sessionId));
     final result = await query.getSingle();
     return result.read(count) ?? 0;
+  }
+
+  /// Get sample counts per band role for a session.
+  Future<Map<BandRole, int>> getSampleCountsByRole(int sessionId) async {
+    final map = <BandRole, int>{};
+    for (final role in BandRole.values) {
+      final count = countAll();
+      final query = selectOnly(imuSampleRecords)..addColumns([count]);
+      query.where(imuSampleRecords.sessionId.equals(sessionId));
+      query.where(imuSampleRecords.bandRole.equals(role.name));
+      final result = await query.getSingle();
+      map[role] = result.read(count) ?? 0;
+    }
+    return map;
+  }
+
+  /// Get window count for a session and band role.
+  Future<int> getWindowCount(int sessionId, BandRole role) async {
+    final count = countAll();
+    final query = selectOnly(sensorWindows)..addColumns([count]);
+    query.where(sensorWindows.sessionId.equals(sessionId));
+    query.where(sensorWindows.bandRole.equals(role.name));
+    final result = await query.getSingle();
+    return result.read(count) ?? 0;
+  }
+
+  /// Export raw IMU samples for a session as CSV.
+  ///
+  /// Returns the path to the exported CSV file.
+  /// CSV header: timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag
+  Future<String> exportSessionCsv(int sessionId) async {
+    final samples = await getImuSamples(sessionId: sessionId);
+    if (samples.isEmpty) {
+      throw StateError('No samples to export for session $sessionId');
+    }
+
+    final directory = await getApplicationDocumentsDirectory();
+    final fileName = 'session_${sessionId}_${DateTime.now().toIso8601String().replaceAll(':', '-')}.csv';
+    final file = File(p.join(directory.path, fileName));
+
+    final buffer = StringBuffer();
+    // Header
+    buffer.writeln('timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
+
+    for (final sample in samples) {
+      buffer.write(
+        '${sample.timestamp.toIso8601String()},'
+        '${sample.bandRole.name},'
+        '"${sample.deviceId}",'
+        '"${sample.deviceName}",'
+        '${sample.ax.toStringAsFixed(6)},'
+        '${sample.ay.toStringAsFixed(6)},'
+        '${sample.az.toStringAsFixed(6)},'
+        '${sample.gx.toStringAsFixed(6)},'
+        '${sample.gy.toStringAsFixed(6)},'
+        '${sample.gz.toStringAsFixed(6)},'
+        '${sample.accelMagnitude.toStringAsFixed(6)},'
+        '${sample.gyroMagnitude.toStringAsFixed(6)}',
+      );
+      buffer.writeln();
+    }
+
+    await file.writeAsString(buffer.toString());
+    return file.path;
   }
 
   // ── Sensor Windows (for ML training) ──

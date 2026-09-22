@@ -64,6 +64,15 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -71,6 +80,7 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     startTime,
     endTime,
     sampleCount,
+    notes,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -118,6 +128,12 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         ),
       );
     }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
     return context;
   }
 
@@ -147,6 +163,10 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         DriftSqlType.int,
         data['${effectivePrefix}sample_count'],
       )!,
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
     );
   }
 
@@ -162,12 +182,14 @@ class Session extends DataClass implements Insertable<Session> {
   final DateTime startTime;
   final DateTime? endTime;
   final int sampleCount;
+  final String? notes;
   const Session({
     required this.id,
     required this.label,
     required this.startTime,
     this.endTime,
     required this.sampleCount,
+    this.notes,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -179,6 +201,9 @@ class Session extends DataClass implements Insertable<Session> {
       map['end_time'] = Variable<DateTime>(endTime);
     }
     map['sample_count'] = Variable<int>(sampleCount);
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
     return map;
   }
 
@@ -191,6 +216,9 @@ class Session extends DataClass implements Insertable<Session> {
           ? const Value.absent()
           : Value(endTime),
       sampleCount: Value(sampleCount),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
     );
   }
 
@@ -205,6 +233,7 @@ class Session extends DataClass implements Insertable<Session> {
       startTime: serializer.fromJson<DateTime>(json['startTime']),
       endTime: serializer.fromJson<DateTime?>(json['endTime']),
       sampleCount: serializer.fromJson<int>(json['sampleCount']),
+      notes: serializer.fromJson<String?>(json['notes']),
     );
   }
   @override
@@ -216,6 +245,7 @@ class Session extends DataClass implements Insertable<Session> {
       'startTime': serializer.toJson<DateTime>(startTime),
       'endTime': serializer.toJson<DateTime?>(endTime),
       'sampleCount': serializer.toJson<int>(sampleCount),
+      'notes': serializer.toJson<String?>(notes),
     };
   }
 
@@ -225,12 +255,14 @@ class Session extends DataClass implements Insertable<Session> {
     DateTime? startTime,
     Value<DateTime?> endTime = const Value.absent(),
     int? sampleCount,
+    Value<String?> notes = const Value.absent(),
   }) => Session(
     id: id ?? this.id,
     label: label ?? this.label,
     startTime: startTime ?? this.startTime,
     endTime: endTime.present ? endTime.value : this.endTime,
     sampleCount: sampleCount ?? this.sampleCount,
+    notes: notes.present ? notes.value : this.notes,
   );
   Session copyWithCompanion(SessionsCompanion data) {
     return Session(
@@ -241,6 +273,7 @@ class Session extends DataClass implements Insertable<Session> {
       sampleCount: data.sampleCount.present
           ? data.sampleCount.value
           : this.sampleCount,
+      notes: data.notes.present ? data.notes.value : this.notes,
     );
   }
 
@@ -251,13 +284,15 @@ class Session extends DataClass implements Insertable<Session> {
           ..write('label: $label, ')
           ..write('startTime: $startTime, ')
           ..write('endTime: $endTime, ')
-          ..write('sampleCount: $sampleCount')
+          ..write('sampleCount: $sampleCount, ')
+          ..write('notes: $notes')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, label, startTime, endTime, sampleCount);
+  int get hashCode =>
+      Object.hash(id, label, startTime, endTime, sampleCount, notes);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -266,7 +301,8 @@ class Session extends DataClass implements Insertable<Session> {
           other.label == this.label &&
           other.startTime == this.startTime &&
           other.endTime == this.endTime &&
-          other.sampleCount == this.sampleCount);
+          other.sampleCount == this.sampleCount &&
+          other.notes == this.notes);
 }
 
 class SessionsCompanion extends UpdateCompanion<Session> {
@@ -275,12 +311,14 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   final Value<DateTime> startTime;
   final Value<DateTime?> endTime;
   final Value<int> sampleCount;
+  final Value<String?> notes;
   const SessionsCompanion({
     this.id = const Value.absent(),
     this.label = const Value.absent(),
     this.startTime = const Value.absent(),
     this.endTime = const Value.absent(),
     this.sampleCount = const Value.absent(),
+    this.notes = const Value.absent(),
   });
   SessionsCompanion.insert({
     this.id = const Value.absent(),
@@ -288,6 +326,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     required DateTime startTime,
     this.endTime = const Value.absent(),
     this.sampleCount = const Value.absent(),
+    this.notes = const Value.absent(),
   }) : label = Value(label),
        startTime = Value(startTime);
   static Insertable<Session> custom({
@@ -296,6 +335,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Expression<DateTime>? startTime,
     Expression<DateTime>? endTime,
     Expression<int>? sampleCount,
+    Expression<String>? notes,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -303,6 +343,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       if (startTime != null) 'start_time': startTime,
       if (endTime != null) 'end_time': endTime,
       if (sampleCount != null) 'sample_count': sampleCount,
+      if (notes != null) 'notes': notes,
     });
   }
 
@@ -312,6 +353,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     Value<DateTime>? startTime,
     Value<DateTime?>? endTime,
     Value<int>? sampleCount,
+    Value<String?>? notes,
   }) {
     return SessionsCompanion(
       id: id ?? this.id,
@@ -319,6 +361,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       sampleCount: sampleCount ?? this.sampleCount,
+      notes: notes ?? this.notes,
     );
   }
 
@@ -340,6 +383,9 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     if (sampleCount.present) {
       map['sample_count'] = Variable<int>(sampleCount.value);
     }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
     return map;
   }
 
@@ -350,7 +396,8 @@ class SessionsCompanion extends UpdateCompanion<Session> {
           ..write('label: $label, ')
           ..write('startTime: $startTime, ')
           ..write('endTime: $endTime, ')
-          ..write('sampleCount: $sampleCount')
+          ..write('sampleCount: $sampleCount, ')
+          ..write('notes: $notes')
           ..write(')'))
         .toString();
   }
@@ -1558,6 +1605,7 @@ typedef $$SessionsTableCreateCompanionBuilder =
       required DateTime startTime,
       Value<DateTime?> endTime,
       Value<int> sampleCount,
+      Value<String?> notes,
     });
 typedef $$SessionsTableUpdateCompanionBuilder =
     SessionsCompanion Function({
@@ -1566,6 +1614,7 @@ typedef $$SessionsTableUpdateCompanionBuilder =
       Value<DateTime> startTime,
       Value<DateTime?> endTime,
       Value<int> sampleCount,
+      Value<String?> notes,
     });
 
 final class $$SessionsTableReferences
@@ -1644,6 +1693,11 @@ class $$SessionsTableFilterComposer
 
   ColumnFilters<int> get sampleCount => $composableBuilder(
     column: $table.sampleCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1731,6 +1785,11 @@ class $$SessionsTableOrderingComposer
     column: $table.sampleCount,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$SessionsTableAnnotationComposer
@@ -1758,6 +1817,9 @@ class $$SessionsTableAnnotationComposer
     column: $table.sampleCount,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
 
   Expression<T> imuSampleRecordsRefs<T extends Object>(
     Expression<T> Function($$ImuSampleRecordsTableAnnotationComposer a) f,
@@ -1846,12 +1908,14 @@ class $$SessionsTableTableManager
                 Value<DateTime> startTime = const Value.absent(),
                 Value<DateTime?> endTime = const Value.absent(),
                 Value<int> sampleCount = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
               }) => SessionsCompanion(
                 id: id,
                 label: label,
                 startTime: startTime,
                 endTime: endTime,
                 sampleCount: sampleCount,
+                notes: notes,
               ),
           createCompanionCallback:
               ({
@@ -1860,12 +1924,14 @@ class $$SessionsTableTableManager
                 required DateTime startTime,
                 Value<DateTime?> endTime = const Value.absent(),
                 Value<int> sampleCount = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
               }) => SessionsCompanion.insert(
                 id: id,
                 label: label,
                 startTime: startTime,
                 endTime: endTime,
                 sampleCount: sampleCount,
+                notes: notes,
               ),
           withReferenceMapper: (p0) => p0
               .map(
