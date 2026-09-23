@@ -59,7 +59,7 @@ class DatabaseService extends _$DatabaseService {
   DatabaseService() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   /// Store DateTime as text (ISO-8601) to preserve millisecond precision.
   /// Default is false which stores as unix timestamps (seconds only).
@@ -81,6 +81,35 @@ class DatabaseService extends _$DatabaseService {
           if (from < 3) {
             // Add notes column to sessions table
             await m.addColumn(sessions, sessions.notes);
+          }
+          if (from < 4) {
+            // Migrate DateTime storage from INTEGER (unix seconds) to TEXT (ISO-8601).
+            // This is required because storeDateTimeAsText was enabled.
+            // Use TableMigration with DateTimeExpressions.fromUnixEpoch to convert.
+            // Cast columns to int since they were stored as unix timestamps.
+            await m.alterTable(TableMigration(
+              sessions,
+              columnTransformer: {
+                sessions.startTime:
+                    DateTimeExpressions.fromUnixEpoch(sessions.startTime.cast<int>()),
+                sessions.endTime:
+                    DateTimeExpressions.fromUnixEpoch(sessions.endTime.cast<int>()),
+              },
+            ));
+            await m.alterTable(TableMigration(
+              imuSampleRecords,
+              columnTransformer: {
+                imuSampleRecords.timestamp:
+                    DateTimeExpressions.fromUnixEpoch(imuSampleRecords.timestamp.cast<int>()),
+              },
+            ));
+            await m.alterTable(TableMigration(
+              sensorWindows,
+              columnTransformer: {
+                sensorWindows.timestamp:
+                    DateTimeExpressions.fromUnixEpoch(sensorWindows.timestamp.cast<int>()),
+              },
+            ));
           }
         },
       );
