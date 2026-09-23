@@ -103,7 +103,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     shouldRestartAdvertising = false;
     #if DEBUG
     Serial.println("BLE: CONNECTED");
+    Serial.println("BLE: REQUESTING FAST CONNECTION PARAMETERS");
     #endif
+
+    pServer->updateConnParams(connInfo.getConnHandle(), 16, 24, 0, 400);
   }
 
   void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {

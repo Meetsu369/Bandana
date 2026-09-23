@@ -234,23 +234,33 @@ class DatabaseService extends _$DatabaseService {
   /// Export raw IMU samples for a session as CSV.
   ///
   /// Returns the path to the exported CSV file.
-  /// CSV header: timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag
+  /// CSV header: sessionId,activity,timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag
   Future<String> exportSessionCsv(int sessionId) async {
     final samples = await getImuSamples(sessionId: sessionId);
     if (samples.isEmpty) {
       throw StateError('No samples to export for session $sessionId');
     }
 
+    // Fetch session details for activity label
+    final sessions = await getAllSessions();
+    final session = sessions.cast<Session?>().firstWhere(
+      (s) => s?.id == sessionId,
+      orElse: () => null,
+    );
+    final activity = session?.label ?? 'Unknown';
+
     final directory = await getApplicationDocumentsDirectory();
     final fileName = 'session_${sessionId}_${DateTime.now().toIso8601String().replaceAll(':', '-')}.csv';
     final file = File(p.join(directory.path, fileName));
 
     final buffer = StringBuffer();
-    // Header
-    buffer.writeln('timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
+    // Header with sessionId and activity
+    buffer.writeln('sessionId,activity,timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
 
     for (final sample in samples) {
       buffer.write(
+        '${sessionId},'
+        '${activity},'
         '${sample.timestamp.toIso8601String()},'
         '${sample.bandRole.name},'
         '"${sample.deviceId}",'
