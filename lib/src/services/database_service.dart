@@ -61,6 +61,12 @@ class DatabaseService extends _$DatabaseService {
   @override
   int get schemaVersion => 3;
 
+  /// Store DateTime as text (ISO-8601) to preserve millisecond precision.
+  /// Default is false which stores as unix timestamps (seconds only).
+  @override
+  DriftDatabaseOptions get options =>
+      const DriftDatabaseOptions(storeDateTimeAsText: true);
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
