@@ -30,12 +30,12 @@
 // COMPILE-TIME CONFIGURATION - UNCOMMENT EXACTLY ONE
 // ============================================================
 #define BAND_ROLE_WRIST
-// #define BAND_ROLE_ANKLE
+//#define BAND_ROLE_ANKLE
 
 // ============================================================
 // CONSTANTS
 // ============================================================
-#define SAMPLE_INTERVAL_MS 100          // 10 Hz
+#define SAMPLE_INTERVAL_MS 20           // 50 Hz
 #define DEBUG 1
 
 // BLE UUIDs (must match Flutter app exactly)
@@ -83,6 +83,13 @@ unsigned long advertisingRestartTime = 0;
 unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
 unsigned long sampleCount = 0;
+
+// Diagnostics for 50 Hz validation
+unsigned long sampleIntervalSum = 0;
+unsigned long sampleIntervalMin = 0xFFFFFFFF;
+unsigned long sampleIntervalMax = 0;
+unsigned long sampleIntervalCount = 0;
+unsigned long lastSampleTimestamp = 0;
 
 // MPU6050 data
 int16_t ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw;
@@ -288,13 +295,21 @@ void print_startup_banner() {
 
 void print_status() {
   #if DEBUG
-  Serial.printf("BLE: %s | Samples: %lu | Rate: %d Hz\n",
+  Serial.printf("BLE: %s | Samples: %lu | Target Rate: %d Hz\n",
                 deviceConnected ? "CONNECTED" : "DISCONNECTED",
                 sampleCount,
                 1000 / SAMPLE_INTERVAL_MS);
   Serial.printf("ACC:  %.4f, %.4f, %.4f\n", ax, ay, az);
   Serial.printf("GYRO: %.4f, %.4f, %.4f\n", gx, gy, gz);
   Serial.printf("SD: %s\n", sdAvailable ? "OK" : "FAILED");
+  
+  // Sampling diagnostics
+  if (sampleIntervalCount > 0) {
+    float avgInterval = (float)sampleIntervalSum / sampleIntervalCount;
+    float actualRate = 1000.0f / avgInterval;
+    Serial.printf("SAMPLING: avg=%.2f ms (%.2f Hz) min=%lu ms max=%lu ms count=%lu\n",
+                  avgInterval, actualRate, sampleIntervalMin, sampleIntervalMax, sampleIntervalCount);
+  }
   Serial.println("---");
   #endif
 }
@@ -342,8 +357,17 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // 1. Read MPU6050 at fixed interval (10 Hz)
+  // 1. Read MPU6050 at fixed interval (50 Hz)
   if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
+    // Track sample interval for diagnostics
+    if (lastSampleTimestamp > 0) {
+      unsigned long interval = now - lastSampleTimestamp;
+      sampleIntervalSum += interval;
+      if (interval < sampleIntervalMin) sampleIntervalMin = interval;
+      if (interval > sampleIntervalMax) sampleIntervalMax = interval;
+      sampleIntervalCount++;
+    }
+    lastSampleTimestamp = now;
     lastSampleTime = now;
 
     if (mpu6050_read()) {

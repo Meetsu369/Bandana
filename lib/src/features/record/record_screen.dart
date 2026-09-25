@@ -62,6 +62,14 @@ class _RecordScreenState extends State<RecordScreen>
   int _ankleMalformedPackets = 0;
   DateTime? _recordingStartTime;
 
+  // Diagnostics for 50 Hz validation
+  Timer? _diagnosticsTimer;
+  DateTime? _lastWristSampleTime;
+  DateTime? _lastAnkleSampleTime;
+  final List<int> _wristIntervals = [];
+  final List<int> _ankleIntervals = [];
+  static const int _maxIntervalSamples = 500; // Keep last 500 intervals (~10 sec at 50 Hz)
+
   // Flag to prevent DB writes after recording stops
   bool _recordingStopped = false;
 
@@ -83,6 +91,50 @@ class _RecordScreenState extends State<RecordScreen>
 
     // Periodic DB flush
     _startDbFlushTimer();
+
+    // Periodic diagnostics (every 5 seconds during recording)
+    _startDiagnosticsTimer();
+  }
+
+  void _startDiagnosticsTimer() {
+    _diagnosticsTimer?.cancel();
+    _diagnosticsTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_isRecording && !_recordingStopped) {
+        _logSamplingDiagnostics();
+      }
+    });
+  }
+
+  void _logSamplingDiagnostics() {
+    // Wrist diagnostics
+    if (_wristIntervals.isNotEmpty) {
+      final avgWristInterval = _wristIntervals.reduce((a, b) => a + b) / _wristIntervals.length;
+      final minWristInterval = _wristIntervals.reduce((a, b) => a < b ? a : b);
+      final maxWristInterval = _wristIntervals.reduce((a, b) => a > b ? a : b);
+      final wristHz = 1000.0 / avgWristInterval;
+      debugPrint('DIAG Wrist: avg=${avgWristInterval.toStringAsFixed(1)}ms (${wristHz.toStringAsFixed(1)} Hz) '
+                 'min=${minWristInterval}ms max=${maxWristInterval}ms samples=${_wristPacketsReceived}');
+    }
+
+    // Ankle diagnostics
+    if (_ankleIntervals.isNotEmpty) {
+      final avgAnkleInterval = _ankleIntervals.reduce((a, b) => a + b) / _ankleIntervals.length;
+      final minAnkleInterval = _ankleIntervals.reduce((a, b) => a < b ? a : b);
+      final maxAnkleInterval = _ankleIntervals.reduce((a, b) => a > b ? a : b);
+      final ankleHz = 1000.0 / avgAnkleInterval;
+      debugPrint('DIAG Ankle: avg=${avgAnkleInterval.toStringAsFixed(1)}ms (${ankleHz.toStringAsFixed(1)} Hz) '
+                 'min=${minAnkleInterval}ms max=${maxAnkleInterval}ms samples=${_anklePacketsReceived}');
+    }
+
+    // Combined
+    final totalSamples = _wristPacketsReceived + _anklePacketsReceived;
+    if (_recordingStartTime != null) {
+      final elapsedSec = DateTime.now().difference(_recordingStartTime!).inSeconds;
+      if (elapsedSec > 0) {
+        final combinedHz = totalSamples / elapsedSec;
+        debugPrint('DIAG Combined: ${combinedHz.toStringAsFixed(1)} Hz total ($totalSamples samples in ${elapsedSec}s)');
+      }
+    }
   }
 
   Timer? _dbFlushTimer;
@@ -115,6 +167,10 @@ class _RecordScreenState extends State<RecordScreen>
     // Cancel flush timer first to prevent new flushes
     _dbFlushTimer?.cancel();
     _dbFlushTimer = null;
+
+    // Cancel diagnostics timer
+    _diagnosticsTimer?.cancel();
+    _diagnosticsTimer = null;
 
     // Prevent any new DB writes
     _recordingStopped = true;
@@ -170,6 +226,10 @@ class _RecordScreenState extends State<RecordScreen>
       _wristMalformedPackets = 0;
       _ankleMalformedPackets = 0;
       _recordingStartTime = DateTime.now();
+      _lastWristSampleTime = null;
+      _lastAnkleSampleTime = null;
+      _wristIntervals.clear();
+      _ankleIntervals.clear();
       _recordingStopped = false; // Reset flag for new recording
     });
 
@@ -190,6 +250,17 @@ class _RecordScreenState extends State<RecordScreen>
 
   void _onWristSensorData(model.ImuSample sample) {
     if (!_isRecording || _recordingStopped) return;
+
+    // Track sampling interval for diagnostics
+    final now = sample.timestamp;
+    if (_lastWristSampleTime != null) {
+      final interval = now.difference(_lastWristSampleTime!).inMilliseconds;
+      _wristIntervals.add(interval);
+      if (_wristIntervals.length > _maxIntervalSamples) {
+        _wristIntervals.removeAt(0);
+      }
+    }
+    _lastWristSampleTime = now;
 
     _wristPacketsReceived++;
     setState(() {
@@ -213,6 +284,17 @@ class _RecordScreenState extends State<RecordScreen>
 
   void _onAnkleSensorData(model.ImuSample sample) {
     if (!_isRecording || _recordingStopped) return;
+
+    // Track sampling interval for diagnostics
+    final now = sample.timestamp;
+    if (_lastAnkleSampleTime != null) {
+      final interval = now.difference(_lastAnkleSampleTime!).inMilliseconds;
+      _ankleIntervals.add(interval);
+      if (_ankleIntervals.length > _maxIntervalSamples) {
+        _ankleIntervals.removeAt(0);
+      }
+    }
+    _lastAnkleSampleTime = now;
 
     _anklePacketsReceived++;
     setState(() {
@@ -275,12 +357,19 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   Future<void> _stopRecording({bool showSnackbar = true}) async {
+    // Log final diagnostics before stopping
+    _logSamplingDiagnostics();
+
     // Prevent new sensor data from being processed
     _recordingStopped = true;
 
     // Cancel flush timer to prevent new flushes
     _dbFlushTimer?.cancel();
     _dbFlushTimer = null;
+
+    // Cancel diagnostics timer
+    _diagnosticsTimer?.cancel();
+    _diagnosticsTimer = null;
 
     _wristSensorSub?.cancel();
     _wristSensorSub = null;
@@ -330,11 +419,14 @@ class _RecordScreenState extends State<RecordScreen>
     }
   }
 
-  String _formatRate(int count) {
+  String _formatRate(int count, {bool isWindow = false}) {
     if (_recordingStartTime == null) return '0/s';
     final elapsed = DateTime.now().difference(_recordingStartTime!).inSeconds;
     if (elapsed == 0) return '0/s';
-    return '${(count / elapsed).toStringAsFixed(1)}/s';
+    if (isWindow) {
+      return '${(count / elapsed).toStringAsFixed(1)}/s';
+    }
+    return '${(count / elapsed).toStringAsFixed(1)} Hz';
   }
 
   @override
@@ -491,7 +583,7 @@ class _RecordScreenState extends State<RecordScreen>
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              'Wrist: $_wristSampleCount windows (${_formatRate(_wristSampleCount)})',
+                              'Wrist: $_wristSampleCount windows, ${_formatRate(_wristPacketsReceived)} samples',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w500,
                                 color: BandRole.wrist.color,
@@ -499,7 +591,7 @@ class _RecordScreenState extends State<RecordScreen>
                             ),
                             const SizedBox(width: 16),
                             Text(
-                              'Ankle: $_ankleSampleCount windows (${_formatRate(_ankleSampleCount)})',
+                              'Ankle: $_ankleSampleCount windows, ${_formatRate(_anklePacketsReceived)} samples',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w500,
                                 color: BandRole.ankle.color,
@@ -597,13 +689,13 @@ class _RecordScreenState extends State<RecordScreen>
                           _buildStatChip(
                             theme,
                             'Wrist RX',
-                            '$_wristPacketsReceived',
+                            '$_wristPacketsReceived (${_formatRate(_wristPacketsReceived)})',
                             BandRole.wrist.color,
                           ),
                           _buildStatChip(
                             theme,
                             'Ankle RX',
-                            '$_anklePacketsReceived',
+                            '$_anklePacketsReceived (${_formatRate(_anklePacketsReceived)})',
                             BandRole.ankle.color,
                           ),
                           if (_wristMalformedPackets > 0)

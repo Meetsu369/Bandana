@@ -2,15 +2,16 @@
 
 ## Last Updated
 
-2026-09-20
+2026-09-25
 
 ## Current Project State
 
-**Dual-band ML pipeline implemented and hardened; real 60-feature model pending hardware data collection and training.**
+**50 Hz migration implemented; hardware validation pending. Dual-band ML pipeline implemented and hardened; real 60-feature model pending hardware data collection and training.**
 
 IMPORTANT:
 Do NOT say the 60-feature ML system is fully operational.
 Do NOT claim a trained 60-feature model exists.
+Do NOT claim 50 Hz is verified until hardware validation is complete.
 
 ---
 
@@ -26,10 +27,7 @@ Meetsu369/Bandana
 feature/dual-band-app-development
 
 **Current commit:**
-ba7b990
-
-**Commit message:**
-fix: harden dual-band ml and data pipeline
+8e8cef6 (migration) + 50 Hz changes (uncommitted)
 
 **Stable branch:**
 feature/dual-band-bandana-update
@@ -44,7 +42,7 @@ https://github.com/Meetsu369/Bandana.git
 https://github.com/RS1ST-GPT/Bandana.git
 
 **Working tree:**
-Clean
+Modified (50 Hz migration changes)
 
 **Push status:**
 Current development branch is pushed to origin.
@@ -94,22 +92,23 @@ firmware/bandana_esp32/bandana_esp32.ino
 - Device names:
   - BANDANA-WRIST
   - BANDANA-ANKLE
-- 10 Hz IMU streaming (CSV: ax,ay,az,gx,gy,gz)
+- **50 Hz IMU streaming (CSV: ax,ay,az,gx,gy,gz)**
 - MTU 512
 - Maximum TX power
 - Automatic advertising/reconnect after disconnect
 - Local SD card logging
 - SD failure does not block BLE operation
+- **Sampling diagnostics: avg/min/max interval, actual Hz (every 5s)**
 
 **To configure as WRIST:**
 ```cpp
 #define BAND_ROLE_WRIST
-// #define BAND_ROLE_ANKLE
+//#define BAND_ROLE_ANKLE
 ```
 
 **To configure as ANKLE:**
 ```cpp
-// #define BAND_ROLE_WRIST
+//#define BAND_ROLE_WRIST
 #define BAND_ROLE_ANKLE
 ```
 
@@ -145,6 +144,12 @@ ax,ay,az,gx,gy,gz
 - No JSON
 - No brackets
 - No extra text
+
+**Sampling Rate:**
+**50 Hz** (20 ms interval per band)
+- Wrist: ~50 samples/sec
+- Ankle: ~50 samples/sec
+- Combined: ~100 samples/sec
 
 ---
 
@@ -250,11 +255,36 @@ The UI must distinguish:
 |-------|--------|
 | flutter analyze | PASS (8 pre-existing warnings in settings_screen.dart) |
 | flutter test | PASS (1/1 widget test) |
-| Git status | Clean |
+| Git status | Modified (50 Hz migration) |
 | Git branch | feature/dual-band-app-development |
-| Current commit | ba7b990 |
+| Current commit | 8e8cef6 + 50 Hz changes (uncommitted) |
 
-**No new warnings introduced by the current changes.**
+**No new warnings introduced by the 50 Hz migration changes.**
+
+---
+
+## 50 Hz Migration Summary (2026-09-25)
+
+### Files Changed
+- `firmware/bandana_esp32/bandana_esp32.ino` — SAMPLE_INTERVAL_MS=20, elapsed-time sampling, diagnostics
+- `firmware/bandana_esp32/platformio.ini` — Build flag SAMPLE_INTERVAL_MS=20
+- `lib/src/core/constants/ble_constants.dart` — sampleRateHz=50, windowSize=100
+- `lib/src/features/record/record_screen.dart` — Diagnostics timer, interval tracking, UI updates
+- `docs/VALIDATION_PROCEDURE_50HZ.md` — New validation procedure document
+
+### Pipeline Changes
+1. **Firmware**: 20 ms interval using `millis()` elapsed-time mechanism (no drift accumulation)
+2. **BLE**: MTU 512, connection params (16, 24, 0, 400) preserved — supports ~100 packets/sec combined
+3. **Mobile**: Receive timestamp preserved; diagnostics every 5s log actual Hz per band
+4. **Database**: Buffered writes (2s flush) handle ~100 samples/sec; max 5000 pending
+5. **Feature Windowing**: 100 samples/window = 2 sec physical window at 50 Hz
+6. **ML**: 30-feature (single) / 60-feature (dual) separation preserved
+7. **CSV**: ISO-8601 timestamps with millisecond precision preserved
+
+### Hardware Validation Required
+See `docs/VALIDATION_PROCEDURE_50HZ.md` for complete procedure.
+
+**Status: IMPLEMENTED — HARDWARE VALIDATION PENDING**
 
 ---
 
@@ -303,7 +333,7 @@ After hardware validation:
 - No Wi-Fi (BLE only, per requirements).
 - No on-device ML (raw streaming only; KNN runs on phone).
 - Single CSV file `/activity.csv` (all sessions append).
-- 10 Hz fixed (configurable via `SAMPLE_INTERVAL_MS`).
+- **50 Hz** fixed (configurable via `SAMPLE_INTERVAL_MS`).
 - No battery voltage monitoring.
 
 ---
@@ -384,12 +414,18 @@ feature/dual-band-app-development
 
 **SOFTWARE STATUS:**
 Dual-band application pipeline implemented and hardened.
+50 Hz migration implemented across firmware, BLE, mobile, database, and ML pipeline.
 
 **ML STATUS:**
 60-feature infrastructure implemented, but real 60-feature model pending.
 
 **HARDWARE STATUS:**
-Physical end-to-end validation pending.
+50 Hz validation pending (see VALIDATION_PROCEDURE_50HZ.md).
 
 **NEXT ACTION:**
-Hardware validation followed by real dual-band data collection and 60-feature model training.
+Run 20–30 second hardware validation test per VALIDATION_PROCEDURE_50HZ.md.
+If validation passes: begin final 50 Hz dataset collection.
+If validation fails: diagnose and fix bottleneck.
+
+**VALIDATION STATUS:**
+STATUS: IMPLEMENTED — HARDWARE VALIDATION PENDING
