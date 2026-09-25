@@ -62,13 +62,13 @@ class _RecordScreenState extends State<RecordScreen>
   int _ankleMalformedPackets = 0;
   DateTime? _recordingStartTime;
 
-  // Diagnostics for 50 Hz validation
+  // Diagnostics for 40 Hz validation
   Timer? _diagnosticsTimer;
   DateTime? _lastWristSampleTime;
   DateTime? _lastAnkleSampleTime;
   final List<int> _wristIntervals = [];
   final List<int> _ankleIntervals = [];
-  static const int _maxIntervalSamples = 500; // Keep last 500 intervals (~10 sec at 50 Hz)
+  static const int _maxIntervalSamples = 500; // Keep last 500 intervals (~12.5 sec at 40 Hz)
 
   // Flag to prevent DB writes after recording stops
   bool _recordingStopped = false;

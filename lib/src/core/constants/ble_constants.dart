@@ -15,10 +15,10 @@ class BleConstants {
   static const String characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
   /// IMU sample rate in Hz.
-  static const int sampleRateHz = 50;
+  static const int sampleRateHz = 40;
 
-  /// Number of samples in one sliding window (2 seconds at 50 Hz).
-  static const int windowSize = 100;
+  /// Number of samples in one sliding window (2 seconds at 40 Hz).
+  static const int windowSize = 80;
 
   /// Number of axes in the IMU data stream (ax, ay, az, gx, gy, gz).
   static const int axisCount = 6;

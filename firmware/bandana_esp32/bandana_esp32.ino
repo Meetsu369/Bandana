@@ -35,7 +35,7 @@
 // ============================================================
 // CONSTANTS
 // ============================================================
-#define SAMPLE_INTERVAL_MS 20           // 50 Hz
+#define SAMPLE_INTERVAL_MS 25           // 40 Hz
 #define DEBUG 1
 
 // BLE UUIDs (must match Flutter app exactly)
@@ -84,7 +84,7 @@ unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
 unsigned long sampleCount = 0;
 
-// Diagnostics for 50 Hz validation
+// Diagnostics for 40 Hz validation
 unsigned long sampleIntervalSum = 0;
 unsigned long sampleIntervalMin = 0xFFFFFFFF;
 unsigned long sampleIntervalMax = 0;
@@ -357,7 +357,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // 1. Read MPU6050 at fixed interval (50 Hz)
+  // 1. Read MPU6050 at fixed interval (40 Hz)
   if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
     // Track sample interval for diagnostics
     if (lastSampleTimestamp > 0) {
