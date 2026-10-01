@@ -1,12 +1,25 @@
 import 'package:flutter/material.dart';
 
-import '../core/theme/app_theme.dart';
+import '../../../core/theme/app_radius.dart';
+import '../../../core/theme/app_shadows.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/app_typography.dart';
 
-/// A Material 3 card showing summary stats for a recorded activity.
+/// A card showing summary stats for a recorded activity.
+///
+/// Used on the Dashboard to display activity summaries.
+/// Includes static utility methods for icon/color mapping used by Live screen.
 class ActivityCard extends StatelessWidget {
+  /// The activity label (e.g., "Walking", "Sitting").
   final String label;
+
+  /// Number of sessions for this activity.
   final int sessionCount;
+
+  /// Total sample/window count for this activity.
   final int totalSamples;
+
+  /// Callback when card is tapped.
   final VoidCallback? onTap;
 
   const ActivityCard({
@@ -30,7 +43,7 @@ class ActivityCard extends StatelessWidget {
     };
   }
 
-  /// Map activity labels to gradient colors.
+  /// Map activity labels to gradient colors (light theme).
   static List<Color> colorsForLabel(String label) {
     return switch (label.toLowerCase()) {
       'walking' => [const Color(0xFF26A69A), const Color(0xFF80CBC4)],
@@ -43,66 +56,82 @@ class ActivityCard extends StatelessWidget {
     };
   }
 
+  /// Map activity labels to gradient colors for a specific brightness.
+  static List<Color> colorsForLabelWithBrightness(String label, Brightness brightness) {
+    final isLight = brightness == Brightness.light;
+    final baseColors = colorsForLabel(label);
+
+    if (isLight) {
+      return baseColors.map((c) => c.withValues(alpha: 0.12)).toList();
+    } else {
+      return baseColors.map((c) => c.withValues(alpha: 0.2)).toList();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = colorsForLabel(label);
-    final isDark = theme.brightness == Brightness.dark;
+    final brightness = theme.brightness;
+    final colors = colorsForLabelWithBrightness(label, brightness);
+    final primaryColor = colorsForLabel(label)[0];
 
     return Card(
       clipBehavior: Clip.antiAlias,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.card,
+        side: AppShadows.cardBorder(brightness).top,
+      ),
       child: InkWell(
         onTap: onTap,
+        borderRadius: AppRadius.card,
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: isDark
-                  ? colors.map((c) => c.withValues(alpha: 0.2)).toList()
-                  : colors.map((c) => c.withValues(alpha: 0.12)).toList(),
+              colors: colors,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
           ),
-          padding: const EdgeInsets.all(AppTheme.spacingMd),
+          padding: const EdgeInsets.all(AppSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Icon
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: colors[0].withValues(alpha: isDark ? 0.3 : 0.15),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                  color: primaryColor.withValues(alpha: brightness == Brightness.dark ? 0.3 : 0.15),
+                  borderRadius: AppRadius.smRadius,
                 ),
                 child: Icon(
                   iconForLabel(label),
-                  color: colors[0],
-                  size: 24,
+                  color: primaryColor,
+                  size: AppSpacing.iconSizeMedium,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               // Label
               Text(
                 label,
-                style: theme.textTheme.titleSmall?.copyWith(
+                style: AppTypography.labelSmallFor(brightness).copyWith(
                   fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               // Stats
               Text(
                 '$sessionCount session${sessionCount != 1 ? 's' : ''}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                style: AppTypography.bodySmallFor(brightness),
               ),
               Text(
                 '$totalSamples samples',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                style: AppTypography.bodySmallFor(brightness),
               ),
             ],
           ),

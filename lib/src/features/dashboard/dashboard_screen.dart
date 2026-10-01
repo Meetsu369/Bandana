@@ -10,7 +10,7 @@ import '../../services/band_assignment_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
-import '../../widgets/activity_card.dart';
+import '../../shared/widgets/cards/activity_card.dart';
 
 /// Dashboard screen – high-level summary of recorded activities and model status.
 class DashboardScreen extends StatefulWidget {

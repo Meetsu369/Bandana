@@ -9,7 +9,7 @@ import '../../models/imu_sample.dart';
 import '../../models/prediction_result.dart';
 import '../../services/ble_service.dart';
 import '../../services/ml_service.dart';
-import '../../widgets/activity_card.dart';
+import '../../shared/widgets/cards/activity_card.dart';
 import '../../widgets/confidence_gauge.dart';
 
 /// Live Mode screen – real-time activity classification.
