@@ -32,10 +32,11 @@ void main() {
   testWidgets('App shell renders bottom navigation', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: BandanaApp()));
 
-    // Verify bottom navigation bar exists with all 4 destinations.
-    expect(find.text('Dashboard'), findsOneWidget);
-    expect(find.text('Record'), findsOneWidget);
-    expect(find.text('Live'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
+    // Verify bottom navigation bar exists with all 5 destinations.
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Activity'), findsOneWidget);
+    expect(find.text('Collect'), findsOneWidget);
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
   });
 }
