@@ -183,8 +183,7 @@ class BandConnection {
       final csv = utf8.decode(value).trim();
       if (csv.isEmpty) return;
 
-      // Use a single timestamp for all lines in this packet
-      final packetTimestamp = DateTime.now();
+      final receiveTimestamp = DateTime.now();
 
       final lines = csv.split('\n');
       for (final line in lines) {
@@ -195,7 +194,7 @@ class BandConnection {
             bandRole: role,
             deviceId: _device?.remoteId.str ?? '',
             deviceName: _device?.platformName ?? 'Unknown',
-            timestamp: packetTimestamp,
+            timestamp: receiveTimestamp,
           );
           if (sample != null) {
             _sensorController.add(sample);
@@ -203,8 +202,8 @@ class BandConnection {
         }
       }
 
-      // Update connection health metrics
-      _lastPacketTime = packetTimestamp;
+      // Update connection health metrics (BLE receive time)
+      _lastPacketTime = receiveTimestamp;
       _packetCount++;
     } catch (_) {
       // Silently skip malformed packets

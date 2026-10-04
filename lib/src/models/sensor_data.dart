@@ -31,19 +31,33 @@ class SensorReading {
     required this.timestamp,
   });
 
-  /// Parse a comma-separated UTF-8 string from the ESP32: "ax,ay,az,gx,gy,gz".
+  /// Parse a comma-separated UTF-8 string from the ESP32.
+  ///
+  /// Supports both legacy 6-value format: "ax,ay,az,gx,gy,gz"
+  /// and new 7-value format: "capture_ts,ax,ay,az,gx,gy,gz".
+  ///
+  /// The firmware capture timestamp is ignored for this legacy model.
   factory SensorReading.fromCsv(String csv) {
     final parts = csv.split(',');
     if (parts.length < 6) {
-      throw FormatException('Expected 6 comma-separated values, got ${parts.length}: "$csv"');
+      throw FormatException('Expected at least 6 comma-separated values, got ${parts.length}: "$csv"');
     }
+
+    // Handle both 6-field (legacy) and 7-field (new) formats
+    final hasCaptureTs = parts.length >= 7;
+    final axisStart = hasCaptureTs ? 1 : 0;
+
+    if (parts.length < axisStart + 6) {
+      throw FormatException('Expected 6 axis values, got ${parts.length - axisStart}: "$csv"');
+    }
+
     return SensorReading(
-      ax: double.parse(parts[0].trim()),
-      ay: double.parse(parts[1].trim()),
-      az: double.parse(parts[2].trim()),
-      gx: double.parse(parts[3].trim()),
-      gy: double.parse(parts[4].trim()),
-      gz: double.parse(parts[5].trim()),
+      ax: double.parse(parts[axisStart].trim()),
+      ay: double.parse(parts[axisStart + 1].trim()),
+      az: double.parse(parts[axisStart + 2].trim()),
+      gx: double.parse(parts[axisStart + 3].trim()),
+      gy: double.parse(parts[axisStart + 4].trim()),
+      gz: double.parse(parts[axisStart + 5].trim()),
       timestamp: DateTime.now(),
     );
   }

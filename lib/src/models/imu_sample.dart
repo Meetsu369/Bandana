@@ -23,7 +23,12 @@ class ImuSample {
   /// Gyroscope Z-axis (°/s).
   final double gz;
 
-  /// Timestamp when this sample was received by the phone.
+  /// Firmware capture timestamp in milliseconds, relative to the ESP32
+  /// firmware session start. Monotonic, NOT Unix epoch.
+  /// Defaults to -1 if not available (e.g., from database records before migration).
+  final int captureTimestampMs;
+
+  /// Timestamp when this sample was received by the phone (wall-clock time).
   final DateTime timestamp;
 
   /// Physical placement of the device that sent this sample.
@@ -42,6 +47,7 @@ class ImuSample {
     required this.gx,
     required this.gy,
     required this.gz,
+    this.captureTimestampMs = -1,
     required this.timestamp,
     required this.bandRole,
     required this.deviceId,
@@ -56,7 +62,7 @@ class ImuSample {
   double get gyroMagnitude =>
       sqrt((gx * gx + gy * gy + gz * gz).clamp(0, double.infinity));
 
-  /// Parse a CSV line from the ESP32: "ax,ay,az,gx,gy,gz".
+  /// Parse a CSV line from the ESP32: "capture_ts,ax,ay,az,gx,gy,gz".
   ///
   /// Returns `null` if the line is malformed (does not throw).
   static ImuSample? tryParseCsv({
@@ -68,15 +74,19 @@ class ImuSample {
   }) {
     try {
       final parts = csv.split(',');
-      if (parts.length < 6) return null;
+      if (parts.length < 7) return null;
+
+      final captureTs = int.tryParse(parts[0].trim());
+      if (captureTs == null) return null;
 
       return ImuSample(
-        ax: double.parse(parts[0].trim()),
-        ay: double.parse(parts[1].trim()),
-        az: double.parse(parts[2].trim()),
-        gx: double.parse(parts[3].trim()),
-        gy: double.parse(parts[4].trim()),
-        gz: double.parse(parts[5].trim()),
+        captureTimestampMs: captureTs,
+        ax: double.parse(parts[1].trim()),
+        ay: double.parse(parts[2].trim()),
+        az: double.parse(parts[3].trim()),
+        gx: double.parse(parts[4].trim()),
+        gy: double.parse(parts[5].trim()),
+        gz: double.parse(parts[6].trim()),
         timestamp: timestamp ?? DateTime.now(),
         bandRole: bandRole,
         deviceId: deviceId,
@@ -98,16 +108,17 @@ class ImuSample {
 
   @override
   String toString() =>
-      'ImuSample(${bandRole.displayName} ax:${ax.toStringAsFixed(2)} '
-      'ay:${ay.toStringAsFixed(2)} az:${az.toStringAsFixed(2)} '
-      'gx:${gx.toStringAsFixed(2)} gy:${gy.toStringAsFixed(2)} '
-      'gz:${gz.toStringAsFixed(2)})';
+      'ImuSample(${bandRole.displayName} ts:$captureTimestampMs '
+      'ax:${ax.toStringAsFixed(2)} ay:${ay.toStringAsFixed(2)} '
+      'az:${az.toStringAsFixed(2)} gx:${gx.toStringAsFixed(2)} '
+      'gy:${gy.toStringAsFixed(2)} gz:${gz.toStringAsFixed(2)})';
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ImuSample &&
           runtimeType == other.runtimeType &&
+          captureTimestampMs == other.captureTimestampMs &&
           ax == other.ax &&
           ay == other.ay &&
           az == other.az &&
@@ -121,6 +132,7 @@ class ImuSample {
 
   @override
   int get hashCode => Object.hash(
+        captureTimestampMs,
         ax,
         ay,
         az,

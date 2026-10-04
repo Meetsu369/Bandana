@@ -448,6 +448,7 @@ class ImuSampleData {
         gx: gx,
         gy: gy,
         gz: gz,
+        captureTimestampMs: -1,
         timestamp: timestamp,
         bandRole: bandRole,
         deviceId: deviceId,
