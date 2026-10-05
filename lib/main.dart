@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'src/core/di/service_locator.dart';
 import 'src/core/theme/app_theme.dart';
-import 'src/features/dashboard/dashboard_screen.dart';
+import 'src/features/home/home_screen.dart';
 import 'src/features/history/history_screen.dart';
 import 'src/features/live/live_screen.dart';
 import 'src/features/profile/profile_screen.dart';
@@ -50,7 +50,7 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final screens = <Widget>[
-      DashboardScreen(),                     // 0: Home
+      HomeScreen(),                          // 0: Home
       LiveScreen(),                          // 1: Activity
       RecordScreen(),                        // 2: Collect
       HistoryScreen(onStartRecording: _onStartRecording), // 3: History
