@@ -11,6 +11,7 @@ import '../../models/sensor_data.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
+import '../../utils/dual_band_window_manager.dart';
 import '../../utils/session_boundary.dart';
 import '../../widgets/sensor_chart.dart';
 
@@ -38,16 +39,16 @@ class _RecordScreenState extends State<RecordScreen>
   // ── Sensor buffers ──
   final List<model.ImuSample> _wristChartBuffer = [];
   final List<model.ImuSample> _ankleChartBuffer = [];
-  final List<model.ImuSample> _wristWindowBuffer = [];
-  final List<model.ImuSample> _ankleWindowBuffer = [];
   final List<model.ImuSample> _wristPendingDbWrite = [];
   final List<model.ImuSample> _anklePendingDbWrite = [];
 
   // Maximum pending writes before we log overflow (prevents unbounded memory growth)
   static const int _maxPendingWrites = 5000;
 
-  // Session boundary detection (shared utility)
-  final _sessionDetector = DualBandSessionDetector();
+  // Window manager for dual-band synchronization
+  final _windowManager = DualBandWindowManager(
+    sessionDetector: DualBandSessionDetector(),
+  );
 
   StreamSubscription<model.ImuSample>? _wristSensorSub;
   StreamSubscription<model.ImuSample>? _ankleSensorSub;
@@ -219,8 +220,6 @@ class _RecordScreenState extends State<RecordScreen>
       _sessionId = sessionId;
       _wristSampleCount = 0;
       _ankleSampleCount = 0;
-      _wristWindowBuffer.clear();
-      _ankleWindowBuffer.clear();
       _wristChartBuffer.clear();
       _ankleChartBuffer.clear();
       _wristPendingDbWrite.clear();
@@ -237,7 +236,7 @@ class _RecordScreenState extends State<RecordScreen>
       _recordingStopped = false; // Reset flag for new recording
     });
 
-    _sessionDetector.reset();
+    _windowManager.reset();
 
     _pulseController.repeat(reverse: true);
 
@@ -268,12 +267,8 @@ class _RecordScreenState extends State<RecordScreen>
     }
     _lastWristSampleTime = now;
 
-    // Session boundary detection
-    if (_sessionDetector.checkBoundary(BandRole.wrist, sample.captureTimestampMs)) {
-      _sessionDetector.handleBoundary(BandRole.wrist);
-      _wristWindowBuffer.clear();
-      debugPrint('Record: Wrist session boundary detected, buffer cleared');
-    }
+    // Add sample to window manager (handles session boundary internally)
+    _windowManager.addSample(sample);
 
     _wristPacketsReceived++;
     setState(() {
@@ -288,11 +283,8 @@ class _RecordScreenState extends State<RecordScreen>
     }
     _wristPendingDbWrite.add(sample);
 
-    _wristWindowBuffer.add(sample);
-
-    if (_wristWindowBuffer.length >= BleConstants.windowSize) {
-      _processWristWindow();
-    }
+    // Try to consume window(s) - atomic dual-band if both connected
+    _tryProcessWindows();
   }
 
   void _onAnkleSensorData(model.ImuSample sample) {
@@ -309,12 +301,8 @@ class _RecordScreenState extends State<RecordScreen>
     }
     _lastAnkleSampleTime = now;
 
-    // Session boundary detection
-    if (_sessionDetector.checkBoundary(BandRole.ankle, sample.captureTimestampMs)) {
-      _sessionDetector.handleBoundary(BandRole.ankle);
-      _ankleWindowBuffer.clear();
-      debugPrint('Record: Ankle session boundary detected, buffer cleared');
-    }
+    // Add sample to window manager (handles session boundary internally)
+    _windowManager.addSample(sample);
 
     _anklePacketsReceived++;
     setState(() {
@@ -329,23 +317,48 @@ class _RecordScreenState extends State<RecordScreen>
     }
     _anklePendingDbWrite.add(sample);
 
-    _ankleWindowBuffer.add(sample);
+    // Try to consume window(s) - atomic dual-band if both connected
+    _tryProcessWindows();
+  }
 
-    if (_ankleWindowBuffer.length >= BleConstants.windowSize) {
-      _processAnkleWindow();
+  /// Attempts to process completed windows atomically.
+  /// For dual-band: both windows must be ready and valid.
+  /// For single-band: the available band's window is processed when ready.
+  void _tryProcessWindows() {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    // Check if we can consume a dual-band window
+    if (!_windowManager.canConsumeDualBandWindow(hasWrist: hasWrist, hasAnkle: hasAnkle)) {
+      return;
+    }
+
+    // Try to atomically consume
+    final consumed = _windowManager.tryConsumeDualBandWindow(
+      hasWrist: hasWrist,
+      hasAnkle: hasAnkle,
+      validateDuration: true,
+    );
+
+    if (consumed == null) {
+      // One or both windows failed validation - they were already consumed
+      debugPrint('Record: Invalid window duration, discarding');
+      return;
+    }
+
+    // Process wrist window if available
+    if (hasWrist && consumed.wristWindow.isNotEmpty) {
+      _processWindow(consumed.wristWindow, BandRole.wrist);
+    }
+
+    // Process ankle window if available
+    if (hasAnkle && consumed.ankleWindow.isNotEmpty) {
+      _processWindow(consumed.ankleWindow, BandRole.ankle);
     }
   }
 
-  Future<void> _processWristWindow() async {
+  Future<void> _processWindow(List<model.ImuSample> window, BandRole role) async {
     if (_sessionId == null || _recordingStopped) return;
-
-    final window = List<model.ImuSample>.from(_wristWindowBuffer);
-    _wristWindowBuffer.clear();
-
-    if (!_sessionDetector.wrist.isValidWindowDuration(window)) {
-      debugPrint('Record: Invalid wrist window duration, discarding window');
-      return;
-    }
 
     final features = MlService.extractFeaturesFromImuSamples(window);
 
@@ -353,36 +366,17 @@ class _RecordScreenState extends State<RecordScreen>
       sessionId: _sessionId!,
       featureVector: features,
       label: _selectedLabel,
-      bandRole: BandRole.wrist,
+      bandRole: role,
     );
 
     if (mounted) {
-      setState(() => _wristSampleCount++);
-    }
-  }
-
-  Future<void> _processAnkleWindow() async {
-    if (_sessionId == null || _recordingStopped) return;
-
-    final window = List<model.ImuSample>.from(_ankleWindowBuffer);
-    _ankleWindowBuffer.clear();
-
-    if (!_sessionDetector.ankle.isValidWindowDuration(window)) {
-      debugPrint('Record: Invalid ankle window duration, discarding window');
-      return;
-    }
-
-    final features = MlService.extractFeaturesFromImuSamples(window);
-
-    await _db.insertWindow(
-      sessionId: _sessionId!,
-      featureVector: features,
-      label: _selectedLabel,
-      bandRole: BandRole.ankle,
-    );
-
-    if (mounted) {
-      setState(() => _ankleSampleCount++);
+      setState(() {
+        if (role == BandRole.wrist) {
+          _wristSampleCount++;
+        } else {
+          _ankleSampleCount++;
+        }
+      });
     }
   }
 

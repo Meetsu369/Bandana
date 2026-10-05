@@ -10,6 +10,7 @@ import '../../models/prediction_result.dart';
 import '../../services/ble_service.dart';
 import '../../services/ml_service.dart';
 import '../../shared/widgets/cards/activity_card.dart';
+import '../../utils/dual_band_window_manager.dart';
 import '../../utils/session_boundary.dart';
 import '../../widgets/confidence_gauge.dart';
 
@@ -29,10 +30,10 @@ class _LiveScreenState extends State<LiveScreen> {
   bool _isRunning = false;
   PredictionResult? _currentPrediction;
   final List<PredictionResult> _history = [];
-  final List<ImuSample> _wristWindowBuffer = [];
-  final List<ImuSample> _ankleWindowBuffer = [];
 
-  final _sessionDetector = DualBandSessionDetector();
+  final _windowManager = DualBandWindowManager(
+    sessionDetector: DualBandSessionDetector(),
+  );
 
   StreamSubscription<ImuSample>? _wristSensorSub;
   StreamSubscription<ImuSample>? _ankleSensorSub;
@@ -77,9 +78,7 @@ class _LiveScreenState extends State<LiveScreen> {
       return;
     }
 
-    _sessionDetector.reset();
-    _wristWindowBuffer.clear();
-    _ankleWindowBuffer.clear();
+    _windowManager.reset();
 
     setState(() => _isRunning = true);
 
@@ -96,29 +95,17 @@ class _LiveScreenState extends State<LiveScreen> {
     _wristSensorSub = null;
     _ankleSensorSub?.cancel();
     _ankleSensorSub = null;
-    _wristWindowBuffer.clear();
-    _ankleWindowBuffer.clear();
-    _sessionDetector.reset();
+    _windowManager.reset();
     if (mounted) setState(() => _isRunning = false);
   }
 
   void _onWristSensorData(ImuSample sample) {
-    if (_sessionDetector.checkBoundary(BandRole.wrist, sample.captureTimestampMs)) {
-      _sessionDetector.handleBoundary(BandRole.wrist);
-      _wristWindowBuffer.clear();
-      debugPrint('Live: Wrist session boundary detected, buffer cleared');
-    }
-    _wristWindowBuffer.add(sample);
+    _windowManager.addSample(sample);
     _tryPredict();
   }
 
   void _onAnkleSensorData(ImuSample sample) {
-    if (_sessionDetector.checkBoundary(BandRole.ankle, sample.captureTimestampMs)) {
-      _sessionDetector.handleBoundary(BandRole.ankle);
-      _ankleWindowBuffer.clear();
-      debugPrint('Live: Ankle session boundary detected, buffer cleared');
-    }
-    _ankleWindowBuffer.add(sample);
+    _windowManager.addSample(sample);
     _tryPredict();
   }
 
@@ -126,67 +113,28 @@ class _LiveScreenState extends State<LiveScreen> {
     final hasWrist = _wristBleState == BandConnectionState.connected;
     final hasAnkle = _ankleBleState == BandConnectionState.connected;
 
-    // Wait for both bands if both connected, otherwise use available one
-    final wristReady = !hasWrist || _wristWindowBuffer.length >= BleConstants.windowSize;
-    final ankleReady = !hasAnkle || _ankleWindowBuffer.length >= BleConstants.windowSize;
+    if (!_windowManager.canConsumeDualBandWindow(hasWrist: hasWrist, hasAnkle: hasAnkle)) {
+      return;
+    }
 
-    if (!wristReady || !ankleReady) return;
+    // Try to atomically consume a dual-band window (or single-band if only one connected)
+    final consumed = _windowManager.tryConsumeDualBandWindow(
+      hasWrist: hasWrist,
+      hasAnkle: hasAnkle,
+      validateDuration: true,
+    );
 
-    // Use adaptive prediction which selects the appropriate model
-    // based on available bands and trained models.
-    // This uses local snapshots to avoid race conditions with the live buffers.
-    List<ImuSample> wristSnapshot;
-    List<ImuSample> ankleSnapshot;
-
-    if (hasWrist && hasAnkle) {
-      // Atomic dual-band window: snapshot and consume BOTH windows first,
-      // then validate. This prevents stale buffer reuse when one window is invalid.
-      wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
-      ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
-
-      // Consume both windows atomically before validation.
-      _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
-      _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
-
-      // Validate window duration - reject windows with session boundary contamination
-      if (!_sessionDetector.validateDualBandWindows(
-        wristWindow: wristSnapshot,
-        ankleWindow: ankleSnapshot,
-        hasWrist: true,
-        hasAnkle: true,
-      )) {
-        debugPrint('Live: Invalid dual-band window duration, discarding');
-        return;
-      }
-    } else if (hasWrist) {
-      wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
-
-      if (!_sessionDetector.wrist.isValidWindowDuration(wristSnapshot)) {
-        debugPrint('Live: Invalid wrist window duration, discarding');
-        _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
-        return;
-      }
-
-      _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
-      ankleSnapshot = [];
-    } else {
-      ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
-
-      if (!_sessionDetector.ankle.isValidWindowDuration(ankleSnapshot)) {
-        debugPrint('Live: Invalid ankle window duration, discarding');
-        _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
-        return;
-      }
-
-      _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
-      wristSnapshot = [];
+    if (consumed == null) {
+      // One or both windows failed validation - they were already consumed
+      debugPrint('Live: Invalid window duration, discarding');
+      return;
     }
 
     // Use adaptive prediction which selects the appropriate model
     // based on available bands and trained models.
     final result = _ml.predictAdaptive(
-      wristWindow: wristSnapshot,
-      ankleWindow: ankleSnapshot,
+      wristWindow: consumed.wristWindow,
+      ankleWindow: consumed.ankleWindow,
     );
 
     if (result != null && mounted) {
@@ -197,8 +145,7 @@ class _LiveScreenState extends State<LiveScreen> {
       });
     } else if (mounted) {
       // No prediction available - could be missing model for the current band combination
-      // This is not an error, just no prediction available yet.
-      debugPrint('Live: No prediction available (wrist: ${wristSnapshot.length}, ankle: ${ankleSnapshot.length}, 30-model: ${_ml.isTrained}, 60-model: ${_ml.isCombinedTrained})');
+      debugPrint('Live: No prediction available (wrist: ${consumed.wristWindow.length}, ankle: ${consumed.ankleWindow.length}, 30-model: ${_ml.isTrained}, 60-model: ${_ml.isCombinedTrained})');
     }
   }
 
