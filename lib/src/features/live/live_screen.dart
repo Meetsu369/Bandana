@@ -10,6 +10,7 @@ import '../../models/prediction_result.dart';
 import '../../services/ble_service.dart';
 import '../../services/ml_service.dart';
 import '../../shared/widgets/cards/activity_card.dart';
+import '../../utils/session_boundary.dart';
 import '../../widgets/confidence_gauge.dart';
 
 /// Live Mode screen – real-time activity classification.
@@ -30,6 +31,8 @@ class _LiveScreenState extends State<LiveScreen> {
   final List<PredictionResult> _history = [];
   final List<ImuSample> _wristWindowBuffer = [];
   final List<ImuSample> _ankleWindowBuffer = [];
+
+  final _sessionDetector = DualBandSessionDetector();
 
   StreamSubscription<ImuSample>? _wristSensorSub;
   StreamSubscription<ImuSample>? _ankleSensorSub;
@@ -74,6 +77,10 @@ class _LiveScreenState extends State<LiveScreen> {
       return;
     }
 
+    _sessionDetector.reset();
+    _wristWindowBuffer.clear();
+    _ankleWindowBuffer.clear();
+
     setState(() => _isRunning = true);
 
     if (hasWrist) {
@@ -91,15 +98,26 @@ class _LiveScreenState extends State<LiveScreen> {
     _ankleSensorSub = null;
     _wristWindowBuffer.clear();
     _ankleWindowBuffer.clear();
+    _sessionDetector.reset();
     if (mounted) setState(() => _isRunning = false);
   }
 
   void _onWristSensorData(ImuSample sample) {
+    if (_sessionDetector.checkBoundary(BandRole.wrist, sample.captureTimestampMs)) {
+      _sessionDetector.handleBoundary(BandRole.wrist);
+      _wristWindowBuffer.clear();
+      debugPrint('Live: Wrist session boundary detected, buffer cleared');
+    }
     _wristWindowBuffer.add(sample);
     _tryPredict();
   }
 
   void _onAnkleSensorData(ImuSample sample) {
+    if (_sessionDetector.checkBoundary(BandRole.ankle, sample.captureTimestampMs)) {
+      _sessionDetector.handleBoundary(BandRole.ankle);
+      _ankleWindowBuffer.clear();
+      debugPrint('Live: Ankle session boundary detected, buffer cleared');
+    }
     _ankleWindowBuffer.add(sample);
     _tryPredict();
   }
@@ -121,20 +139,45 @@ class _LiveScreenState extends State<LiveScreen> {
     List<ImuSample> ankleSnapshot;
 
     if (hasWrist && hasAnkle) {
-      // Take snapshots of both windows, then clear the consumed samples.
-      // This avoids race conditions where the buffers are modified during prediction.
+      // Atomic dual-band window: snapshot and consume BOTH windows first,
+      // then validate. This prevents stale buffer reuse when one window is invalid.
       wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
       ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
 
-      // Remove the consumed samples from the buffers.
+      // Consume both windows atomically before validation.
       _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
       _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
+
+      // Validate window duration - reject windows with session boundary contamination
+      if (!_sessionDetector.validateDualBandWindows(
+        wristWindow: wristSnapshot,
+        ankleWindow: ankleSnapshot,
+        hasWrist: true,
+        hasAnkle: true,
+      )) {
+        debugPrint('Live: Invalid dual-band window duration, discarding');
+        return;
+      }
     } else if (hasWrist) {
       wristSnapshot = _wristWindowBuffer.take(BleConstants.windowSize).toList();
+
+      if (!_sessionDetector.wrist.isValidWindowDuration(wristSnapshot)) {
+        debugPrint('Live: Invalid wrist window duration, discarding');
+        _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
+        return;
+      }
+
       _wristWindowBuffer.removeRange(0, BleConstants.windowSize);
       ankleSnapshot = [];
     } else {
       ankleSnapshot = _ankleWindowBuffer.take(BleConstants.windowSize).toList();
+
+      if (!_sessionDetector.ankle.isValidWindowDuration(ankleSnapshot)) {
+        debugPrint('Live: Invalid ankle window duration, discarding');
+        _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
+        return;
+      }
+
       _ankleWindowBuffer.removeRange(0, BleConstants.windowSize);
       wristSnapshot = [];
     }

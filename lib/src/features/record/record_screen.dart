@@ -11,6 +11,7 @@ import '../../models/sensor_data.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
+import '../../utils/session_boundary.dart';
 import '../../widgets/sensor_chart.dart';
 
 /// Record Mode screen – tag and record IMU data streams with activity labels.
@@ -44,6 +45,9 @@ class _RecordScreenState extends State<RecordScreen>
 
   // Maximum pending writes before we log overflow (prevents unbounded memory growth)
   static const int _maxPendingWrites = 5000;
+
+  // Session boundary detection (shared utility)
+  final _sessionDetector = DualBandSessionDetector();
 
   StreamSubscription<model.ImuSample>? _wristSensorSub;
   StreamSubscription<model.ImuSample>? _ankleSensorSub;
@@ -233,6 +237,8 @@ class _RecordScreenState extends State<RecordScreen>
       _recordingStopped = false; // Reset flag for new recording
     });
 
+    _sessionDetector.reset();
+
     _pulseController.repeat(reverse: true);
 
     // Start flush timer
@@ -261,6 +267,13 @@ class _RecordScreenState extends State<RecordScreen>
       }
     }
     _lastWristSampleTime = now;
+
+    // Session boundary detection
+    if (_sessionDetector.checkBoundary(BandRole.wrist, sample.captureTimestampMs)) {
+      _sessionDetector.handleBoundary(BandRole.wrist);
+      _wristWindowBuffer.clear();
+      debugPrint('Record: Wrist session boundary detected, buffer cleared');
+    }
 
     _wristPacketsReceived++;
     setState(() {
@@ -296,6 +309,13 @@ class _RecordScreenState extends State<RecordScreen>
     }
     _lastAnkleSampleTime = now;
 
+    // Session boundary detection
+    if (_sessionDetector.checkBoundary(BandRole.ankle, sample.captureTimestampMs)) {
+      _sessionDetector.handleBoundary(BandRole.ankle);
+      _ankleWindowBuffer.clear();
+      debugPrint('Record: Ankle session boundary detected, buffer cleared');
+    }
+
     _anklePacketsReceived++;
     setState(() {
       _ankleChartBuffer.add(sample);
@@ -322,6 +342,11 @@ class _RecordScreenState extends State<RecordScreen>
     final window = List<model.ImuSample>.from(_wristWindowBuffer);
     _wristWindowBuffer.clear();
 
+    if (!_sessionDetector.wrist.isValidWindowDuration(window)) {
+      debugPrint('Record: Invalid wrist window duration, discarding window');
+      return;
+    }
+
     final features = MlService.extractFeaturesFromImuSamples(window);
 
     await _db.insertWindow(
@@ -341,6 +366,11 @@ class _RecordScreenState extends State<RecordScreen>
 
     final window = List<model.ImuSample>.from(_ankleWindowBuffer);
     _ankleWindowBuffer.clear();
+
+    if (!_sessionDetector.ankle.isValidWindowDuration(window)) {
+      debugPrint('Record: Invalid ankle window duration, discarding window');
+      return;
+    }
 
     final features = MlService.extractFeaturesFromImuSamples(window);
 
