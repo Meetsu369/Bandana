@@ -4,7 +4,7 @@ import 'package:bandana/src/core/theme/app_colors.dart';
 import 'package:bandana/src/core/theme/app_radius.dart';
 import 'package:bandana/src/core/theme/app_spacing.dart';
 import 'package:bandana/src/core/theme/app_typography.dart';
-import 'package:bandana/src/features/settings/settings_screen.dart';
+import 'package:bandana/src/features/settings/devices_screen.dart';
 import 'package:bandana/src/shared/widgets/buttons/secondary_button.dart';
 import 'package:bandana/src/shared/widgets/feedback/empty_state.dart';
 import 'package:bandana/src/shared/widgets/section_header.dart';
@@ -46,9 +46,9 @@ class ProfileScreen extends StatelessWidget {
               description:
                   'Participant data, height, weight, and fitness goals will appear here.',
               action: SecondaryButton(
-                label: 'Open Settings',
-                leadingIcon: Icons.settings_outlined,
-                onPressed: () => _openSettings(context),
+                label: 'My Bands',
+                leadingIcon: Icons.watch_outlined,
+                onPressed: () => _openDevices(context),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -60,10 +60,10 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             _buildActionCard(
               context,
-              title: 'Settings',
-              subtitle: 'Devices, data management, app preferences',
-              icon: Icons.settings_outlined,
-              onTap: () => _openSettings(context),
+              title: 'My Bands',
+              subtitle: 'Manage Wrist and Ankle sensors',
+              icon: Icons.watch_outlined,
+              onTap: () => _openDevices(context),
             ),
           ],
         ),
@@ -145,10 +145,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _openSettings(BuildContext context) {
+  void _openDevices(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const SettingsScreen(),
+        builder: (_) => const DevicesScreen(),
       ),
     );
   }

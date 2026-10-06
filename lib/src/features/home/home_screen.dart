@@ -21,6 +21,7 @@ import '../../shared/widgets/section_header.dart';
 import '../../features/record/record_screen.dart';
 import '../../features/record/session_detail_screen.dart';
 import '../../features/history/history_screen.dart';
+import '../../features/settings/devices_screen.dart';
 
 /// Home screen – polished professional BANDANA experience.
 class HomeScreen extends StatefulWidget {
@@ -347,13 +348,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     leadingIconColor: theme.colorScheme.primary,
                     action: TextButton(
                       onPressed: () {
-                        // Navigate to device management - could open settings or a device screen
-                        // For now, we'll just show a snackbar
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Device management coming soon'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const DevicesScreen()),
                         );
                       },
                       child: Text(
@@ -690,11 +686,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: 'Open Band Settings',
                 leadingIcon: Icons.settings_outlined,
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Band settings coming soon'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DevicesScreen()),
                   );
                 },
               ),
