@@ -100,8 +100,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Convert to format expected by ML service (features, label only)
       final trainingData = data.map((d) => (features: d.features, label: d.label)).toList();
       final success = combined
-          ? _ml.trainCombined(trainingData)
-          : _ml.trainSingleBand(trainingData);
+          ? await _ml.trainCombined(trainingData)
+          : await _ml.trainSingleBand(trainingData);
 
       if (mounted) {
         setState(() {
