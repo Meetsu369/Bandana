@@ -58,6 +58,9 @@ class SensorWindows extends Table {
 class DatabaseService extends _$DatabaseService {
   DatabaseService() : super(_openConnection());
 
+  /// Creates a DatabaseService instance with a custom executor for testing.
+  DatabaseService.withExecutor(QueryExecutor executor) : super(executor);
+
   @override
   int get schemaVersion => 4;
 
@@ -362,6 +365,82 @@ class DatabaseService extends _$DatabaseService {
           (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
       return (features: featureList, label: row.label);
     }).toList();
+  }
+
+  /// Get windows for training filtered by session IDs and band role.
+  Future<List<({List<double> features, String label})>>
+      getWindowsForTrainingBySessions({
+    required List<int> sessionIds,
+    required BandRole bandRole,
+  }) async {
+    if (sessionIds.isEmpty) return [];
+    final rows = await (select(sensorWindows)
+          ..where((w) => w.bandRole.equals(bandRole.name))
+          ..where((w) => w.sessionId.isIn(sessionIds)))
+        .get();
+    return rows.map((row) {
+      final featureList =
+          (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
+      return (features: featureList, label: row.label);
+    }).toList();
+  }
+
+  /// Get windows for combined dual-band training filtered by session IDs.
+  /// Returns pairs of (wrist features, ankle features, label) for sessions that have both.
+  Future<List<({List<double> wristFeatures, List<double> ankleFeatures, String label})>>
+      getCombinedWindowsForTrainingBySessions({
+    required List<int> sessionIds,
+  }) async {
+    if (sessionIds.isEmpty) return [];
+
+    // Get wrist windows for these sessions
+    final wristRows = await (select(sensorWindows)
+          ..where((w) => w.bandRole.equals(BandRole.wrist.name))
+          ..where((w) => w.sessionId.isIn(sessionIds)))
+        .get();
+
+    // Get ankle windows for these sessions
+    final ankleRows = await (select(sensorWindows)
+          ..where((w) => w.bandRole.equals(BandRole.ankle.name))
+          ..where((w) => w.sessionId.isIn(sessionIds)))
+        .get();
+
+    // Group by session ID and label - store lists to preserve all windows
+    final wristMap = <String, List<({List<double> features, String label})>>{};
+    final ankleMap = <String, List<({List<double> features, String label})>>{};
+
+    for (final row in wristRows) {
+      final featureList =
+          (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
+      final key = '${row.sessionId}_${row.label}';
+      wristMap.putIfAbsent(key, () => []).add((features: featureList, label: row.label));
+    }
+
+    for (final row in ankleRows) {
+      final featureList =
+          (jsonDecode(row.features) as List).cast<num>().map((n) => n.toDouble()).toList();
+      final key = '${row.sessionId}_${row.label}';
+      ankleMap.putIfAbsent(key, () => []).add((features: featureList, label: row.label));
+    }
+
+    // Combine pairs - pair each wrist window with each ankle window for the same session+label
+    final combined = <({List<double> wristFeatures, List<double> ankleFeatures, String label})>[];
+    for (final entry in wristMap.entries) {
+      final ankleList = ankleMap[entry.key];
+      if (ankleList != null) {
+        for (final wristEntry in entry.value) {
+          for (final ankleEntry in ankleList) {
+            combined.add((
+              wristFeatures: wristEntry.features,
+              ankleFeatures: ankleEntry.features,
+              label: wristEntry.label,
+            ));
+          }
+        }
+      }
+    }
+
+    return combined;
   }
 
   /// Total number of stored windows across all sessions.
