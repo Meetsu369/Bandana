@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:bandana/src/core/di/service_locator.dart';
 import 'package:bandana/src/services/band_assignment_manager.dart';
 import 'package:bandana/src/core/constants/ble_constants.dart';
 

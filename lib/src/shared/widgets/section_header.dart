@@ -80,7 +80,7 @@ class SectionHeader extends StatelessWidget {
                   Text(
                     title,
                     style: titleStyle ?? defaultTitleStyle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (subtitle != null) ...[

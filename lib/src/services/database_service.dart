@@ -8,6 +8,7 @@ import 'dart:io';
 
 import '../core/constants/ble_constants.dart';
 import '../models/imu_sample.dart' as model;
+import '../utils/filename_utils.dart';
 
 part 'database_service.g.dart';
 
@@ -17,6 +18,7 @@ part 'database_service.g.dart';
 class Sessions extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get label => text()();
+  TextColumn get participantId => text().withDefault(const Constant('participant_1'))();
   DateTimeColumn get startTime => dateTime()();
   DateTimeColumn get endTime => dateTime().nullable()();
   IntColumn get sampleCount => integer().withDefault(const Constant(0))();
@@ -39,6 +41,7 @@ class ImuSampleRecords extends Table {
   RealColumn get gz => real()();
   RealColumn get accelMagnitude => real()();
   RealColumn get gyroMagnitude => real()();
+  IntColumn get captureTimestampMs => integer().withDefault(const Constant(-1))();
   DateTimeColumn get timestamp => dateTime()();
 }
 
@@ -52,17 +55,30 @@ class SensorWindows extends Table {
   DateTimeColumn get timestamp => dateTime()();
 }
 
+/// User feedback on predictions for supervised candidate model improvement.
+class PredictionFeedbacks extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get predictedLabel => text()();
+  TextColumn get userFeedback => text()(); // 'correct' or 'incorrect'
+  TextColumn get correctedLabel => text().nullable()();
+  TextColumn get modelVersion => text()(); // e.g. 'knn_30_v1', 'softmax_60_v1'
+  RealColumn get confidence => real().nullable()();
+  IntColumn get sessionId => integer().nullable().references(Sessions, #id)();
+  DateTimeColumn get timestamp => dateTime()();
+  BoolColumn get isReviewed => boolean().withDefault(const Constant(false))();
+}
+
 // ── Database ──
 
-@DriftDatabase(tables: [Sessions, ImuSampleRecords, SensorWindows])
+@DriftDatabase(tables: [Sessions, ImuSampleRecords, SensorWindows, PredictionFeedbacks])
 class DatabaseService extends _$DatabaseService {
   DatabaseService() : super(_openConnection());
 
   /// Creates a DatabaseService instance with a custom executor for testing.
-  DatabaseService.withExecutor(QueryExecutor executor) : super(executor);
+  DatabaseService.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   /// Store DateTime as text (ISO-8601) to preserve millisecond precision.
   /// Default is false which stores as unix timestamps (seconds only).
@@ -114,16 +130,25 @@ class DatabaseService extends _$DatabaseService {
               },
             ));
           }
+          if (from < 5) {
+            await m.addColumn(sessions, sessions.participantId);
+            await m.addColumn(imuSampleRecords, imuSampleRecords.captureTimestampMs);
+            await m.createTable(predictionFeedbacks);
+          }
         },
       );
 
   // ── Sessions ──
 
   /// Create a new recording session and return its ID.
-  Future<int> createSession(String label) async {
+  Future<int> createSession(
+    String label, {
+    String participantId = 'participant_1',
+  }) async {
     final id = await into(sessions).insert(
       SessionsCompanion.insert(
         label: label,
+        participantId: Value(participantId),
         startTime: DateTime.now(),
       ),
     );
@@ -200,6 +225,7 @@ class DatabaseService extends _$DatabaseService {
             gz: Value(sample.gz),
             accelMagnitude: Value(sample.accelMagnitude),
             gyroMagnitude: Value(sample.gyroMagnitude),
+            captureTimestampMs: Value(sample.captureTimestampMs),
             timestamp: Value(sample.timestamp),
           ),
         );
@@ -232,6 +258,7 @@ class DatabaseService extends _$DatabaseService {
       gz: r.gz,
       accelMagnitude: r.accelMagnitude,
       gyroMagnitude: r.gyroMagnitude,
+      captureTimestampMs: r.captureTimestampMs,
       timestamp: r.timestamp,
     )).toList();
   }
@@ -272,35 +299,52 @@ class DatabaseService extends _$DatabaseService {
   /// Export raw IMU samples for a session as CSV.
   ///
   /// Returns the path to the exported CSV file.
-  /// CSV header: sessionId,activity,timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag
+  /// Generates standardized filename: `participant_activity_YYYYMMDD_HHmmss.csv`
   Future<String> exportSessionCsv(int sessionId) async {
     final samples = await getImuSamples(sessionId: sessionId);
     if (samples.isEmpty) {
       throw StateError('No samples to export for session $sessionId');
     }
 
-    // Fetch session details for activity label
+    // Fetch session details for activity and participant metadata
     final sessions = await getAllSessions();
     final session = sessions.cast<Session?>().firstWhere(
       (s) => s?.id == sessionId,
       orElse: () => null,
     );
-    final activity = session?.label ?? 'Unknown';
+    final participant = session?.participantId ?? 'participant_1';
+    final activity = session?.label ?? 'activity';
+    final startTime = session?.startTime ?? DateTime.now();
 
     final directory = await getApplicationDocumentsDirectory();
-    final fileName = 'session_${sessionId}_${DateTime.now().toIso8601String().replaceAll(':', '-')}.csv';
-    final file = File(p.join(directory.path, fileName));
+    final fileName = FilenameUtils.generateSessionCsvFilename(
+      participantId: participant,
+      activityLabel: activity,
+      timestamp: startTime,
+    );
+    final file = await FilenameUtils.resolveUniqueFile(directory, fileName);
 
     final buffer = StringBuffer();
-    // Header with sessionId and activity
-    buffer.writeln('sessionId,activity,timestamp,bandRole,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
+    // Metadata comments header
+    buffer.writeln('# BANDANA IMU Session Export');
+    buffer.writeln('# Schema Version: 2');
+    buffer.writeln('# Session ID: $sessionId');
+    buffer.writeln('# Participant ID: $participant');
+    buffer.writeln('# Activity: $activity');
+    buffer.writeln('# Start Time: ${startTime.toIso8601String()}');
+    if (session?.notes != null && session!.notes!.isNotEmpty) {
+      buffer.writeln('# Notes: ${session.notes!.replaceAll('\n', ' ')}');
+    }
+    buffer.writeln('sessionId,participantId,activity,bandRole,captureTimestampMs,receiveTimestamp,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
 
     for (final sample in samples) {
       buffer.write(
-        '${sessionId},'
-        '${activity},'
-        '${sample.timestamp.toIso8601String()},'
+        '$sessionId,'
+        '"$participant",'
+        '"$activity",'
         '${sample.bandRole.name},'
+        '${sample.captureTimestampMs},'
+        '${sample.timestamp.toIso8601String()},'
         '"${sample.deviceId}",'
         '"${sample.deviceName}",'
         '${sample.ax.toStringAsFixed(6)},'
@@ -472,10 +516,56 @@ class DatabaseService extends _$DatabaseService {
     return map;
   }
 
+  // ── Prediction Feedbacks ──
+
+  /// Record user feedback on an activity prediction.
+  Future<int> insertPredictionFeedback({
+    required String predictedLabel,
+    required String userFeedback,
+    String? correctedLabel,
+    required String modelVersion,
+    double? confidence,
+    int? sessionId,
+  }) async {
+    return into(predictionFeedbacks).insert(
+      PredictionFeedbacksCompanion.insert(
+        predictedLabel: predictedLabel,
+        userFeedback: userFeedback,
+        correctedLabel: Value(correctedLabel),
+        modelVersion: modelVersion,
+        confidence: Value(confidence),
+        sessionId: Value(sessionId),
+        timestamp: DateTime.now(),
+      ),
+    );
+  }
+
+  /// Get all prediction feedback records, newest first.
+  Future<List<PredictionFeedback>> getAllPredictionFeedbacks() {
+    return (select(predictionFeedbacks)
+          ..orderBy([(f) => OrderingTerm.desc(f.timestamp)]))
+        .get();
+  }
+
+  /// Get pending unreviewed feedback records.
+  Future<List<PredictionFeedback>> getUnreviewedFeedbacks() {
+    return (select(predictionFeedbacks)
+          ..where((f) => f.isReviewed.equals(false))
+          ..orderBy([(f) => OrderingTerm.desc(f.timestamp)]))
+        .get();
+  }
+
+  /// Mark a feedback item as reviewed.
+  Future<void> markFeedbackReviewed(int feedbackId) async {
+    await (update(predictionFeedbacks)..where((f) => f.id.equals(feedbackId)))
+        .write(const PredictionFeedbacksCompanion(isReviewed: Value(true)));
+  }
+
   // ── Danger zone ──
 
   /// Delete all sessions and associated data.
   Future<void> clearAll() async {
+    await delete(predictionFeedbacks).go();
     await delete(imuSampleRecords).go();
     await delete(sensorWindows).go();
     await delete(sessions).go();
@@ -499,6 +589,7 @@ class ImuSampleData {
   final double gz;
   final double accelMagnitude;
   final double gyroMagnitude;
+  final int captureTimestampMs;
   final DateTime timestamp;
 
   const ImuSampleData({
@@ -515,6 +606,7 @@ class ImuSampleData {
     required this.gz,
     required this.accelMagnitude,
     required this.gyroMagnitude,
+    this.captureTimestampMs = -1,
     required this.timestamp,
   });
 
@@ -527,7 +619,7 @@ class ImuSampleData {
         gx: gx,
         gy: gy,
         gz: gz,
-        captureTimestampMs: -1,
+        captureTimestampMs: captureTimestampMs,
         timestamp: timestamp,
         bandRole: bandRole,
         deviceId: deviceId,

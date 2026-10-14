@@ -99,7 +99,11 @@ class BandConnection {
       }
     });
 
-    await FlutterBluePlus.startScan(timeout: BleConstants.scanTimeout);
+    try {
+      await FlutterBluePlus.startScan(timeout: BleConstants.scanTimeout);
+    } catch (_) {
+      // Silently handle if Bluetooth is off or permissions not yet granted
+    }
 
     if (_state == BandConnectionState.scanning) {
       _updateState(BandConnectionState.disconnected);
@@ -108,7 +112,9 @@ class BandConnection {
 
   /// Stop scanning for this band.
   Future<void> stopScan() async {
-    await FlutterBluePlus.stopScan();
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
     await _scanSubscription?.cancel();
     if (_state == BandConnectionState.scanning) {
       _updateState(BandConnectionState.disconnected);
@@ -118,7 +124,9 @@ class BandConnection {
   /// Connect to a specific device (used when user manually assigns).
   Future<void> connectToDevice(BluetoothDevice device) async {
     await _scanSubscription?.cancel();
-    await FlutterBluePlus.stopScan();
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
     _connectToDevice(device);
   }
 
@@ -211,8 +219,12 @@ class BandConnection {
   }
 
   Future<void> disconnect() async {
-    await _notifySubscription?.cancel();
-    await _device?.disconnect();
+    try {
+      await _notifySubscription?.cancel();
+    } catch (_) {}
+    try {
+      await _device?.disconnect();
+    } catch (_) {}
     _handleDisconnect();
   }
 

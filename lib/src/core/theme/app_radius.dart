@@ -39,8 +39,11 @@ class AppRadius {
   /// Card radius — standard cards use md (18px).
   static const BorderRadius card = mdRadius;
 
-  /// Hero card radius — primary metrics use xl (28px).
-  static const BorderRadius heroCard = xlRadius;
+  /// Bento container radius — prominent bento containers use lg (24px).
+  static const BorderRadius bentoCard = lgRadius;
+
+  /// Hero card radius — primary metrics use lg/xl (24px).
+  static const BorderRadius heroCard = lgRadius;
 
   /// Button radius — standard buttons use md (18px).
   static const BorderRadius button = mdRadius;

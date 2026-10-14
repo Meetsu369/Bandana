@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/ble_constants.dart';
 import '../../core/di/service_locator.dart';
@@ -8,9 +10,11 @@ import '../../core/theme/app_theme.dart';
 import '../../features/record/session_detail_screen.dart';
 import '../../models/imu_sample.dart' as model;
 import '../../models/sensor_data.dart';
+import '../../services/activity_label_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
+import '../../utils/cadence_gate.dart';
 import '../../utils/dual_band_window_manager.dart';
 import '../../utils/session_boundary.dart';
 import '../../widgets/sensor_chart.dart';
@@ -27,9 +31,12 @@ class _RecordScreenState extends State<RecordScreen>
     with SingleTickerProviderStateMixin {
   final _ble = getIt<BleService>();
   final _db = getIt<DatabaseService>();
+  final _labelManager = getIt<ActivityLabelManager>();
 
-  // ── Recording state ──
+  // ── Session Setup & Recording state ──
   String _selectedLabel = BleConstants.defaultLabels.first;
+  String _participantId = 'participant_1';
+  final _participantController = TextEditingController(text: 'participant_1');
   String _sessionNotes = '';
   bool _isRecording = false;
   int? _sessionId;
@@ -50,6 +57,9 @@ class _RecordScreenState extends State<RecordScreen>
     sessionDetector: DualBandSessionDetector(),
   );
 
+  // 40 Hz Cadence Gates
+  final _cadenceGate = DualBandCadenceGate();
+
   StreamSubscription<model.ImuSample>? _wristSensorSub;
   StreamSubscription<model.ImuSample>? _ankleSensorSub;
   StreamSubscription<BandConnectionState>? _wristBleSub;
@@ -69,11 +79,6 @@ class _RecordScreenState extends State<RecordScreen>
 
   // Diagnostics for 40 Hz validation
   Timer? _diagnosticsTimer;
-  DateTime? _lastWristSampleTime;
-  DateTime? _lastAnkleSampleTime;
-  final List<int> _wristIntervals = [];
-  final List<int> _ankleIntervals = [];
-  static const int _maxIntervalSamples = 500; // Keep last 500 intervals (~12.5 sec at 40 Hz)
 
   // Flag to prevent DB writes after recording stops
   bool _recordingStopped = false;
@@ -94,11 +99,31 @@ class _RecordScreenState extends State<RecordScreen>
       duration: const Duration(milliseconds: 1000),
     );
 
+    // Initialize participant and activity labels
+    final prefs = getIt<SharedPreferences>();
+    final savedParticipant = prefs.getString('bandana_participant_id');
+    if (savedParticipant != null && savedParticipant.trim().isNotEmpty) {
+      _participantId = savedParticipant.trim();
+      _participantController.text = _participantId;
+    }
+    _selectedLabel = _labelManager.allLabels.first;
+    _labelManager.addListener(_onLabelsChanged);
+
     // Periodic DB flush
     _startDbFlushTimer();
 
     // Periodic diagnostics (every 5 seconds during recording)
     _startDiagnosticsTimer();
+  }
+
+  void _onLabelsChanged() {
+    if (mounted) {
+      setState(() {
+        if (!_labelManager.allLabels.contains(_selectedLabel)) {
+          _selectedLabel = _labelManager.allLabels.first;
+        }
+      });
+    }
   }
 
   void _startDiagnosticsTimer() {
@@ -111,27 +136,12 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   void _logSamplingDiagnostics() {
-    // Wrist diagnostics
-    if (_wristIntervals.isNotEmpty) {
-      final avgWristInterval = _wristIntervals.reduce((a, b) => a + b) / _wristIntervals.length;
-      final minWristInterval = _wristIntervals.reduce((a, b) => a < b ? a : b);
-      final maxWristInterval = _wristIntervals.reduce((a, b) => a > b ? a : b);
-      final wristHz = 1000.0 / avgWristInterval;
-      debugPrint('DIAG Wrist: avg=${avgWristInterval.toStringAsFixed(1)}ms (${wristHz.toStringAsFixed(1)} Hz) '
-                 'min=${minWristInterval}ms max=${maxWristInterval}ms samples=${_wristPacketsReceived}');
-    }
+    final wristDiag = _cadenceGate.wristGate.diagnostics;
+    final ankleDiag = _cadenceGate.ankleGate.diagnostics;
+    debugPrint('DIAG Wrist: ${wristDiag.toString()}');
+    debugPrint('DIAG Ankle: ${ankleDiag.toString()}');
 
-    // Ankle diagnostics
-    if (_ankleIntervals.isNotEmpty) {
-      final avgAnkleInterval = _ankleIntervals.reduce((a, b) => a + b) / _ankleIntervals.length;
-      final minAnkleInterval = _ankleIntervals.reduce((a, b) => a < b ? a : b);
-      final maxAnkleInterval = _ankleIntervals.reduce((a, b) => a > b ? a : b);
-      final ankleHz = 1000.0 / avgAnkleInterval;
-      debugPrint('DIAG Ankle: avg=${avgAnkleInterval.toStringAsFixed(1)}ms (${ankleHz.toStringAsFixed(1)} Hz) '
-                 'min=${minAnkleInterval}ms max=${maxAnkleInterval}ms samples=${_anklePacketsReceived}');
-    }
-
-    // Combined
+    // Combined diagnostic log
     final totalSamples = _wristPacketsReceived + _anklePacketsReceived;
     if (_recordingStartTime != null) {
       final elapsedSec = DateTime.now().difference(_recordingStartTime!).inSeconds;
@@ -150,11 +160,11 @@ class _RecordScreenState extends State<RecordScreen>
     });
   }
 
-  Future<void> _flushDbBuffers() async {
+  Future<void> _flushDbBuffers({bool force = false}) async {
     if (_sessionId == null) return;
     if (_wristPendingDbWrite.isEmpty && _anklePendingDbWrite.isEmpty) return;
-    // Don't flush if recording has been stopped
-    if (_recordingStopped) return;
+    // Don't flush if recording has been stopped, unless explicitly forced for final persistence
+    if (_recordingStopped && !force) return;
 
     final wristToWrite = List<model.ImuSample>.from(_wristPendingDbWrite);
     final ankleToWrite = List<model.ImuSample>.from(_anklePendingDbWrite);
@@ -162,13 +172,18 @@ class _RecordScreenState extends State<RecordScreen>
     _anklePendingDbWrite.clear();
 
     await Future.wait([
-      _db.insertImuSamples(sessionId: _sessionId!, samples: wristToWrite),
-      _db.insertImuSamples(sessionId: _sessionId!, samples: ankleToWrite),
+      if (wristToWrite.isNotEmpty)
+        _db.insertImuSamples(sessionId: _sessionId!, samples: wristToWrite),
+      if (ankleToWrite.isNotEmpty)
+        _db.insertImuSamples(sessionId: _sessionId!, samples: ankleToWrite),
     ]);
   }
 
   @override
   void dispose() {
+    _labelManager.removeListener(_onLabelsChanged);
+    _participantController.dispose();
+
     // Cancel flush timer first to prevent new flushes
     _dbFlushTimer?.cancel();
     _dbFlushTimer = null;
@@ -177,18 +192,18 @@ class _RecordScreenState extends State<RecordScreen>
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
 
-    // Prevent any new DB writes
-    _recordingStopped = true;
-
-    // Flush any remaining data (fire and forget - dispose can't be async)
-    _flushDbBuffers();
-
     // Cancel sensor subscriptions
     _wristSensorSub?.cancel();
     _ankleSensorSub?.cancel();
     _wristBleSub?.cancel();
     _ankleBleSub?.cancel();
 
+    // Final flush if recording
+    if (_isRecording) {
+      _flushDbBuffers(force: true);
+    }
+
+    _recordingStopped = true;
     _pulseController.dispose();
     super.dispose();
   }
@@ -207,8 +222,17 @@ class _RecordScreenState extends State<RecordScreen>
       return;
     }
 
-    // Create a new session in the DB.
-    final sessionId = await _db.createSession(_selectedLabel);
+    // Persist participant ID
+    final prefs = getIt<SharedPreferences>();
+    _participantId = _participantController.text.trim();
+    if (_participantId.isEmpty) _participantId = 'participant_1';
+    await prefs.setString('bandana_participant_id', _participantId);
+
+    // Create a new session in the DB with participant ID
+    final sessionId = await _db.createSession(
+      _selectedLabel,
+      participantId: _participantId,
+    );
 
     // Save notes if provided
     if (_sessionNotes.isNotEmpty) {
@@ -229,14 +253,11 @@ class _RecordScreenState extends State<RecordScreen>
       _wristMalformedPackets = 0;
       _ankleMalformedPackets = 0;
       _recordingStartTime = DateTime.now();
-      _lastWristSampleTime = null;
-      _lastAnkleSampleTime = null;
-      _wristIntervals.clear();
-      _ankleIntervals.clear();
       _recordingStopped = false; // Reset flag for new recording
     });
 
     _windowManager.reset();
+    _cadenceGate.reset();
 
     _pulseController.repeat(reverse: true);
 
@@ -256,25 +277,25 @@ class _RecordScreenState extends State<RecordScreen>
   void _onWristSensorData(model.ImuSample sample) {
     if (!_isRecording || _recordingStopped) return;
 
-    // Track sampling interval for diagnostics
-    final now = sample.timestamp;
-    if (_lastWristSampleTime != null) {
-      final interval = now.difference(_lastWristSampleTime!).inMilliseconds;
-      _wristIntervals.add(interval);
-      if (_wristIntervals.length > _maxIntervalSamples) {
-        _wristIntervals.removeAt(0);
-      }
+    // Enforce 40 Hz accepted cadence gate
+    final decision = _cadenceGate.wristGate.processSample(sample);
+    if (decision == CadenceDecision.droppedBurst ||
+        decision == CadenceDecision.droppedDuplicate ||
+        decision == CadenceDecision.droppedOutOfOrder) {
+      // Discard sub-interval burst or duplicate sample
+      return;
     }
-    _lastWristSampleTime = now;
 
-    // Add sample to window manager (handles session boundary internally)
+    // Add accepted sample to window manager
     _windowManager.addSample(sample);
 
     _wristPacketsReceived++;
-    setState(() {
-      _wristChartBuffer.add(sample);
-      if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
-    });
+    if (mounted) {
+      setState(() {
+        _wristChartBuffer.add(sample);
+        if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
+      });
+    }
 
     // Bounded pending writes with overflow logging
     if (_wristPendingDbWrite.length >= _maxPendingWrites) {
@@ -290,25 +311,25 @@ class _RecordScreenState extends State<RecordScreen>
   void _onAnkleSensorData(model.ImuSample sample) {
     if (!_isRecording || _recordingStopped) return;
 
-    // Track sampling interval for diagnostics
-    final now = sample.timestamp;
-    if (_lastAnkleSampleTime != null) {
-      final interval = now.difference(_lastAnkleSampleTime!).inMilliseconds;
-      _ankleIntervals.add(interval);
-      if (_ankleIntervals.length > _maxIntervalSamples) {
-        _ankleIntervals.removeAt(0);
-      }
+    // Enforce 40 Hz accepted cadence gate
+    final decision = _cadenceGate.ankleGate.processSample(sample);
+    if (decision == CadenceDecision.droppedBurst ||
+        decision == CadenceDecision.droppedDuplicate ||
+        decision == CadenceDecision.droppedOutOfOrder) {
+      // Discard sub-interval burst or duplicate sample
+      return;
     }
-    _lastAnkleSampleTime = now;
 
-    // Add sample to window manager (handles session boundary internally)
+    // Add accepted sample to window manager
     _windowManager.addSample(sample);
 
     _anklePacketsReceived++;
-    setState(() {
-      _ankleChartBuffer.add(sample);
-      if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
-    });
+    if (mounted) {
+      setState(() {
+        _ankleChartBuffer.add(sample);
+        if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
+      });
+    }
 
     // Bounded pending writes with overflow logging
     if (_anklePendingDbWrite.length >= _maxPendingWrites) {
@@ -381,35 +402,34 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   Future<void> _stopRecording({bool showSnackbar = true}) async {
-    // Log final diagnostics before stopping
+    // Log final cadence diagnostics before stopping
     _logSamplingDiagnostics();
 
-    // Prevent new sensor data from being processed
-    _recordingStopped = true;
+    // 1. Immediately cancel sensor stream subscriptions so no new incoming packets are accepted
+    await _wristSensorSub?.cancel();
+    _wristSensorSub = null;
+    await _ankleSensorSub?.cancel();
+    _ankleSensorSub = null;
 
-    // Cancel flush timer to prevent new flushes
+    // 2. Cancel timers and animation
     _dbFlushTimer?.cancel();
     _dbFlushTimer = null;
-
-    // Cancel diagnostics timer
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
-
-    _wristSensorSub?.cancel();
-    _wristSensorSub = null;
-    _ankleSensorSub?.cancel();
-    _ankleSensorSub = null;
     _pulseController.stop();
     _pulseController.reset();
 
-    // Flush any remaining data (will respect _recordingStopped flag)
-    await _flushDbBuffers();
+    // 3. Guaranteed final buffer flush BEFORE marking recording stopped
+    await _flushDbBuffers(force: true);
 
-    // Capture sessionId before clearing state
+    // 4. Mark recording stopped
+    _recordingStopped = true;
+
+    // 5. Finalize session in DB with exact persisted sample count
     final completedSessionId = _sessionId;
 
     if (completedSessionId != null) {
-      final totalSamples = _wristSampleCount + _ankleSampleCount;
+      final totalSamples = await _db.getSampleCount(completedSessionId);
       await _db.endSession(completedSessionId, totalSamples);
     }
 
@@ -443,6 +463,69 @@ class _RecordScreenState extends State<RecordScreen>
     }
   }
 
+  void _showAddCustomActivityDialog() {
+    final textController = TextEditingController();
+    String? errorText;
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add Custom Activity'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Enter a new activity label:'),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: textController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: 'Activity Name',
+                      errorText: errorText,
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (val) {
+                      setDialogState(() {
+                        errorText = _labelManager.validateLabel(val);
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final validation = _labelManager.validateLabel(textController.text);
+                    if (validation != null) {
+                      setDialogState(() => errorText = validation);
+                      return;
+                    }
+                    final added = await _labelManager.addCustomLabel(textController.text);
+                    if (added && mounted && context.mounted) {
+                      setState(() {
+                        _selectedLabel = textController.text.trim();
+                      });
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   String _formatRate(int count, {bool isWindow = false}) {
     if (_recordingStartTime == null) return '0/s';
     final elapsed = DateTime.now().difference(_recordingStartTime!).inSeconds;
@@ -473,49 +556,8 @@ class _RecordScreenState extends State<RecordScreen>
         padding: const EdgeInsets.all(AppTheme.spacingMd),
         child: Column(
           children: [
-            // ── Label Selector ──
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppTheme.spacingMd,
-                  vertical: AppTheme.spacingSm,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.label_outline,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedLabel,
-                          isExpanded: true,
-                          onChanged: _isRecording
-                              ? null
-                              : (value) {
-                                  if (value != null) {
-                                    setState(() => _selectedLabel = value);
-                                  }
-                                },
-                          items: BleConstants.defaultLabels.map((label) {
-                            return DropdownMenuItem(
-                              value: label,
-                              child: Text(label),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: AppTheme.spacingMd),
-
-            // ── Session Notes (optional) ──
-            if (!_isRecording)
+            // ── Session Setup (Participant, Activity, Notes) ──
+            if (!_isRecording) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(AppTheme.spacingMd),
@@ -524,28 +566,78 @@ class _RecordScreenState extends State<RecordScreen>
                     children: [
                       Row(
                         children: [
-                          Icon(
-                            Icons.notes_outlined,
-                            color: theme.colorScheme.primary,
-                            size: 20,
+                          Icon(Icons.person_outline, color: theme.colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Participant ID', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.spacingXs),
+                      TextField(
+                        controller: _participantController,
+                        decoration: InputDecoration(
+                          hintText: 'e.g. sumeet_1, participant_1',
+                          helperText: 'Participant label is used in exported CSV filenames',
+                          helperMaxLines: 2,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.spacingMd),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.label_outline, color: theme.colorScheme.primary, size: 20),
+                              const SizedBox(width: 8),
+                              Text('Activity', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Session Notes (Optional)',
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                          TextButton.icon(
+                            onPressed: _showAddCustomActivityDialog,
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Custom Activity'),
+                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                           ),
                         ],
                       ),
-                      const SizedBox(height: AppTheme.spacingSm),
+                      const SizedBox(height: AppTheme.spacingXs),
+                      DropdownButtonFormField<String>(
+                        initialValue: _labelManager.allLabels.contains(_selectedLabel)
+                            ? _selectedLabel
+                            : _labelManager.allLabels.first,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          isDense: true,
+                        ),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _selectedLabel = value);
+                          }
+                        },
+                        items: _labelManager.allLabels.map((label) {
+                          return DropdownMenuItem(
+                            value: label,
+                            child: Text(label),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: AppTheme.spacingMd),
+                      Row(
+                        children: [
+                          Icon(Icons.notes_outlined, color: theme.colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Session Notes (Optional)', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.spacingXs),
                       TextField(
                         maxLines: 2,
                         decoration: InputDecoration(
                           hintText: 'Add context about this recording session...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
                           contentPadding: const EdgeInsets.all(AppTheme.spacingMd),
                           isDense: true,
                         ),
@@ -555,7 +647,8 @@ class _RecordScreenState extends State<RecordScreen>
                   ),
                 ),
               ),
-            if (!_isRecording) const SizedBox(height: AppTheme.spacingMd),
+              const SizedBox(height: AppTheme.spacingMd),
+            ],
 
             // ── Stats Bar ──
             if (_isRecording)
@@ -635,57 +728,96 @@ class _RecordScreenState extends State<RecordScreen>
             Expanded(
               child: Card(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-                  child: Column(
-                    children: [
-                      // Wrist Chart
-                      if (hasWrist) ...[
-                        _buildChartSection(
-                          theme,
-                          'Wrist',
-                          BandRole.wrist.color,
-                          _wristChartBuffer,
-                          _wristBleState,
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                      // Ankle Chart
-                      if (hasAnkle) ...[
-                        _buildChartSection(
-                          theme,
-                          'Ankle',
-                          BandRole.ankle.color,
-                          _ankleChartBuffer,
-                          _ankleBleState,
-                        ),
-                      ],
-                      if (!hasWrist && !hasAnkle) ...[
-                        Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                  padding: const EdgeInsets.fromLTRB(8, 12, 16, 8),
+                  child: !hasWrist && !hasAnkle
+                      ? Center(
+                          child: Stack(
+                            alignment: Alignment.center,
                             children: [
-                              Icon(
-                                Icons.show_chart,
-                                size: 48,
-                                color: theme.colorScheme.onSurfaceVariant
-                                    .withValues(alpha: 0.5),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _isRecording
-                                    ? 'Waiting for data…'
-                                    : 'Connect bands and start recording to see charts',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                              Positioned.fill(
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: CustomPaint(
+                                    painter: _BlueprintChartPainter(theme.brightness),
+                                  ),
                                 ),
-                                textAlign: TextAlign.center,
+                              ),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Container(
+                                  margin: const EdgeInsets.all(8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: (theme.brightness == Brightness.light ? Colors.white : const Color(0xFF1E2129))
+                                        .withValues(alpha: 0.94),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: theme.brightness == Brightness.light
+                                          ? const Color(0xFF1A1A1A)
+                                          : const Color(0xFF383B46),
+                                      width: 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.08),
+                                        offset: const Offset(0, 4),
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.sensors_outlined,
+                                        size: 26,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Live Telemetry Blueprint',
+                                        style: theme.textTheme.titleSmall?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Connect bands to stream real-time 6-DOF IMU data',
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.onSurfaceVariant,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ],
                           ),
+                        )
+                      : ListView(
+                          children: [
+                            if (hasWrist) ...[
+                              _buildChartSection(
+                                theme,
+                                'Wrist',
+                                BandRole.wrist.color,
+                                _wristChartBuffer,
+                                _wristBleState,
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            if (hasAnkle) ...[
+                              _buildChartSection(
+                                theme,
+                                'Ankle',
+                                BandRole.ankle.color,
+                                _ankleChartBuffer,
+                                _ankleBleState,
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                    ],
-                  ),
                 ),
               ),
             ),
@@ -951,4 +1083,61 @@ class _RecordScreenState extends State<RecordScreen>
       ),
     );
   }
+}
+
+/// Custom painter for the blueprint telemetry illustration when no bands are streaming.
+class _BlueprintChartPainter extends CustomPainter {
+  final Brightness brightness;
+  _BlueprintChartPainter(this.brightness);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final isLight = brightness == Brightness.light;
+    final gridPaint = Paint()
+      ..color = isLight ? const Color(0x18000000) : const Color(0x1FFFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    // Draw horizontal grid lines
+    const hDivisions = 4;
+    for (int i = 0; i <= hDivisions; i++) {
+      final y = size.height * (i / hDivisions);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    // Draw vertical grid lines
+    const vDivisions = 8;
+    for (int i = 0; i <= vDivisions; i++) {
+      final x = size.width * (i / vDivisions);
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+
+    // Waveform paths (faint preview waveforms)
+    void drawWave(Color color, double freq, double amp, double phase) {
+      final wavePaint = Paint()
+        ..color = color.withValues(alpha: isLight ? 0.22 : 0.30)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.8;
+
+      final path = Path();
+      final midY = size.height / 2;
+      for (double x = 0; x <= size.width; x += 4) {
+        final normX = x / size.width;
+        final y = midY + amp * math.sin(normX * freq * 2 * math.pi + phase);
+        if (x == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, wavePaint);
+    }
+
+    drawWave(const Color(0xFFFF3388), 3.0, size.height * 0.25, 0.0);
+    drawWave(const Color(0xFF4CAF50), 4.5, size.height * 0.20, 1.2);
+    drawWave(const Color(0xFF2196F3), 2.0, size.height * 0.30, 2.5);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

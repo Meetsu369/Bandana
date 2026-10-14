@@ -71,7 +71,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _trainModel({bool combined = false}) async {
+  Future<void> trainModel({bool combined = false}) async {
     setState(() {
       _isTraining = true;
       _trainingError = null;
@@ -468,26 +468,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               label: const Text('Training…'),
             )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                FloatingActionButton.extended(
-                  heroTag: 'train-single',
-                  onPressed: () => _trainModel(combined: false),
-                  icon: const Icon(Icons.model_training),
-                  label: const Text('Train 30-Feat'),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.extended(
-                  heroTag: 'train-combined',
-                  onPressed: () => _trainModel(combined: true),
-                  icon: const Icon(Icons.model_training),
-                  label: const Text('Train 60-Feat'),
-                  backgroundColor: Colors.orange,
-                ),
-              ],
-            ),
+          : null, // Removed training FABs - use Profile → Model Training instead
     );
   }
 

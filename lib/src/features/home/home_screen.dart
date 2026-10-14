@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../core/theme/app_colors.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_radius.dart';
@@ -11,13 +12,12 @@ import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
 import '../../shared/widgets/cards/band_status_card.dart';
-import '../../shared/widgets/cards/hero_metric_card.dart';
-import '../../shared/widgets/cards/metric_card.dart';
-import '../../shared/widgets/feedback/empty_state.dart';
 import '../../shared/widgets/feedback/loading_state.dart';
 import '../../shared/widgets/feedback/error_state.dart';
 import '../../shared/widgets/buttons/primary_button.dart';
 import '../../shared/widgets/section_header.dart';
+import '../../shared/widgets/status/status_pill.dart';
+import '../../features/training/training_screen.dart';
 import '../../features/record/record_screen.dart';
 import '../../features/record/session_detail_screen.dart';
 import '../../features/history/history_screen.dart';
@@ -160,34 +160,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Good evening';
   }
 
-  String _getReadinessText() {
-    final hasWrist = _wristState == BandConnectionState.connected;
-    final hasAnkle = _ankleState == BandConnectionState.connected;
-
-    if (hasWrist && hasAnkle) {
-      return 'Dual-band ready';
-    } else if (hasWrist) {
-      return 'Wrist ready — connect Ankle for dual-band';
-    } else if (hasAnkle) {
-      return 'Ankle ready — connect Wrist for dual-band';
-    } else {
-      return 'Connect a band to start';
-    }
-  }
-
-  String _getReadinessSubtext() {
-    final hasWrist = _wristState == BandConnectionState.connected;
-    final hasAnkle = _ankleState == BandConnectionState.connected;
-
-    if (hasWrist && hasAnkle) {
-      return 'Both bands connected and streaming';
-    } else if (hasWrist || hasAnkle) {
-      return 'Single-band recording available';
-    } else {
-      return 'No bands connected';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -197,7 +169,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasAnkle = _ankleState == BandConnectionState.connected;
     final anyConnected = hasWrist || hasAnkle;
     final bothConnected = hasWrist && hasAnkle;
-    final modelReady = _ml.isTrained || _ml.isCombinedTrained;
     final hasData = _recentSessions.isNotEmpty;
 
     if (_isLoading) {
@@ -236,272 +207,157 @@ class _HomeScreenState extends State<HomeScreen> {
           onRefresh: _loadData,
           child: CustomScrollView(
             slivers: [
-              // ── Header / Greeting ──
+              // ── Header / Greeting: Clean single header row ──
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md,
                     AppSpacing.md,
                     AppSpacing.md,
-                    AppSpacing.sm,
+                    AppSpacing.xs,
                   ),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _getGreeting(),
-                              style: AppTypography.h1For(brightness).copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: theme.colorScheme.onSurface,
-                              ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _getGreeting(),
+                            style: AppTypography.displayFor(brightness).copyWith(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.8,
+                              color: theme.colorScheme.onSurface,
                             ),
-                            const SizedBox(height: AppSpacing.xs),
-                            Text(
-                              _getReadinessSubtext(),
-                              style: AppTypography.bodyMediumFor(brightness).copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
+                            maxLines: 1,
+                          ),
                         ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Consolidated Bluetooth Quick-Status Indicator
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                              );
+                            },
+                            child: StatusPill(
+                              variant: bothConnected
+                                  ? StatusPillVariant.connected
+                                  : StatusPillVariant.disconnected,
+                              text: bothConnected
+                                  ? 'Connected'
+                                  : anyConnected
+                                      ? '1 Band'
+                                      : 'Offline',
+                              icon: Icons.bluetooth,
+                              showIcon: true,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          // Avatar Icon (Quick Access to Profile / Devices)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                              );
+                            },
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: AppColors.primaryAccent(brightness),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: brightness == Brightness.light ? const Color(0xFF18181B) : const Color(0xFF2E3038),
+                                  width: 2.0,
+                                ),
+                                boxShadow: AppShadows.hardSm(brightness),
+                              ),
+                              child: const Icon(
+                                Icons.person,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
               ),
 
-              // ── Hero Card: Today's Activity / Recording Readiness ──
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                  child: HeroMetricCard(
-                    label: _todaySessionCount > 0 ? "Today's activity" : 'Ready to record',
-                    value: _todaySessionCount > 0 ? '$_todaySessionCount' : '—',
-                    unit: _todaySessionCount == 1 ? 'session' : 'sessions',
-                    description: _todaySessionCount > 0
-                        ? 'Keep going — every session counts'
-                        : _getReadinessText(),
-                    leading: Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: anyConnected
-                            ? (bothConnected ? theme.colorScheme.secondaryContainer : theme.colorScheme.primaryContainer)
-                            : theme.colorScheme.surfaceContainerHighest,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        anyConnected
-                            ? (bothConnected ? Icons.directions_walk : Icons.watch)
-                            : Icons.sensors_off,
-                        size: 28,
-                        color: anyConnected
-                            ? (bothConnected ? theme.colorScheme.onSecondaryContainer : theme.colorScheme.onPrimaryContainer)
-                            : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    trailingAction: anyConnected
-                        ? PrimaryButton(
-                            label: 'Start Recording',
-                            leadingIcon: Icons.fiber_manual_record,
-                            showArrow: true,
-                            onPressed: _navigateToRecord,
-                            height: 44,
-                          )
-                        : null,
-                    valueColor: anyConnected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-                    gradient: anyConnected && bothConnected
-                        ? LinearGradient(
-                            colors: [
-                              theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
-                              theme.colorScheme.secondaryContainer.withValues(alpha: 0.3),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : null,
-                    isTappable: anyConnected,
-                    onTap: _navigateToRecord,
-                    semanticsLabel: _todaySessionCount > 0
-                        ? "Today's activity: $_todaySessionCount sessions recorded"
-                        : 'Ready to record: ${_getReadinessText()}',
-                  ),
-                ),
-              ),
-
-              // ── Band Readiness ──
+              // ── Band Readiness: Side-by-Side Split Row (50% / 50% width) ──
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md,
-                    AppSpacing.lg,
+                    AppSpacing.md,
                     AppSpacing.md,
                     AppSpacing.sm,
                   ),
-                  child: SectionHeader(
-                    title: 'Band Readiness',
-                    subtitle: _getReadinessText(),
-                    leadingIcon: Icons.bluetooth_connected,
-                    leadingIconColor: theme.colorScheme.primary,
-                    action: TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const DevicesScreen()),
-                        );
-                      },
-                      child: Text(
-                        'Manage',
-                        style: AppTypography.labelFor(brightness).copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                   child: BandStatusCard(
                     wristState: _wristState,
                     ankleState: _ankleState,
                     wristDeviceName: _wristDeviceName,
                     ankleDeviceName: _ankleDeviceName,
                     showSignal: false,
-                    showDeviceNames: true,
-                    onManageTap: null,
+                    showDeviceNames: false,
+                    onManageTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                      );
+                    },
                   ),
                 ),
               ),
 
-              // ── Activity Summary ──
-              if (hasData) ...[
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.md,
-                      AppSpacing.lg,
-                      AppSpacing.md,
-                      AppSpacing.sm,
-                    ),
-                    child: SectionHeader(
-                      title: 'Activity Summary',
-                      subtitle: '$_totalSessions sessions • $_totalWindows windows',
-                      leadingIcon: Icons.analytics_outlined,
-                      leadingIconColor: theme.colorScheme.primary,
-                    ),
+              // ── Activity Summary: 4-Cell Bento Modular Grid ──
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                  ),
+                  child: SectionHeader(
+                    title: 'Activity Summary',
+                    subtitle: '$_totalSessions ${_totalSessions == 1 ? 'session' : 'sessions'} • ${_formatNumber(_totalWindows)} windows',
+                    leadingIcon: Icons.analytics_outlined,
+                    leadingIconColor: AppColors.primaryAccent(brightness),
                   ),
                 ),
+              ),
 
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        // Use 2 columns on wider screens, 1 on narrow
-                        final crossAxisCount = constraints.maxWidth > 400 ? 2 : 1;
-                        final cards = <Widget>[];
-
-                        // Today's sessions
-                        cards.add(MetricCard(
-                          label: "Today's Sessions",
-                          value: _todaySessionCount.toString(),
-                          unit: 'sessions',
-                          supportingText: _todaySessionCount > 0 ? 'Well done!' : 'Start your first session',
-                          leadingIcon: Icons.today_outlined,
-                          valueColor: _todaySessionCount > 0 ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-                          onTap: _navigateToRecord,
-                          semanticsLabel: "Today's sessions: $_todaySessionCount",
-                        ));
-
-                        // Total sessions
-                        cards.add(MetricCard(
-                          label: 'Total Sessions',
-                          value: _totalSessions.toString(),
-                          unit: 'sessions',
-                          supportingText: 'All time',
-                          leadingIcon: Icons.history_outlined,
-                          valueColor: theme.colorScheme.onSurface,
-                          semanticsLabel: 'Total sessions: $_totalSessions',
-                        ));
-
-                        // Total windows
-                        cards.add(MetricCard(
-                          label: 'Feature Windows',
-                          value: _totalWindows.toString(),
-                          unit: 'windows',
-                          supportingText: 'For training',
-                          leadingIcon: Icons.data_array_outlined,
-                          valueColor: theme.colorScheme.onSurface,
-                          semanticsLabel: 'Total feature windows: $_totalWindows',
-                        ));
-
-                        // Model status
-                        final modelText = _ml.isCombinedTrained
-                            ? 'Dual-band ready (60 feat)'
-                            : _ml.isTrained
-                                ? 'Single-band ready (30 feat)'
-                                : 'Not trained';
-                        final modelColor = _ml.isCombinedTrained
-                            ? theme.colorScheme.secondary
-                            : _ml.isTrained
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onSurfaceVariant;
-
-                        cards.add(MetricCard(
-                          label: 'Model Status',
-                          value: _ml.isTrained || _ml.isCombinedTrained ? 'Ready' : 'Not trained',
-                          supportingText: modelText,
-                          leadingIcon: Icons.psychology_outlined,
-                          valueColor: modelColor,
-                          semanticsLabel: 'Model: $modelText',
-                        ));
-
-                        // Latest activity (if any)
-                        if (_recentSessions.isNotEmpty) {
-                          final latest = _recentSessions.first;
-                          final duration = latest.endTime != null
-                              ? latest.endTime!.difference(latest.startTime)
-                              : DateTime.now().difference(latest.startTime);
-                          final mins = duration.inMinutes;
-                          final secs = duration.inSeconds % 60;
-                          final durStr = mins > 0 ? '${mins}m ${secs}s' : '${secs}s';
-
-                          cards.add(MetricCard(
-                            label: 'Latest Activity',
-                            value: latest.label,
-                            supportingText: '$durStr • ${_formatDate(latest.startTime)}',
-                            leadingIcon: Icons.directions_run_outlined,
-                            valueColor: theme.colorScheme.primary,
-                            onTap: () => _navigateToSessionDetail(latest.id),
-                            semanticsLabel: 'Latest activity: ${latest.label}, $durStr',
-                          ));
-                        }
-
-                        return GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: crossAxisCount,
-                            mainAxisSpacing: AppSpacing.sm,
-                            crossAxisSpacing: AppSpacing.sm,
-                            childAspectRatio: crossAxisCount == 2 ? 1.3 : 2.2,
-                          ),
-                          itemCount: cards.length,
-                          itemBuilder: (context, index) => cards[index],
-                        );
-                      },
-                    ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: Column(
+                    children: [
+                      // Cell 1: Today's Focus (Full Width, Sky Blue)
+                      _buildBentoCell1(context, brightness, anyConnected),
+                      const SizedBox(height: AppSpacing.sm),
+                      // Cell 2 & Cell 3 (Side-by-side 50% / 50% split)
+                      _buildBentoRow2and3(context, brightness, theme),
+                      const SizedBox(height: AppSpacing.sm),
+                      // Cell 4: Latest Activity (Full Width, White/Surface)
+                      _buildBentoCell4(context, brightness, theme),
+                    ],
                   ),
                 ),
-              ],
+              ),
 
-              // ── Recent Sessions ──
+              // ── Recent Sessions Section ──
               if (hasData) ...[
                 SliverToBoxAdapter(
                   child: Padding(
@@ -515,14 +371,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       title: 'Recent Sessions',
                       subtitle: 'Tap to view details',
                       leadingIcon: Icons.history_outlined,
-                      leadingIconColor: theme.colorScheme.primary,
+                      leadingIconColor: AppColors.primaryAccent(brightness),
                       action: TextButton(
                         onPressed: _navigateToHistory,
                         child: Text(
                           'See all →',
                           style: AppTypography.labelFor(brightness).copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryAccent(brightness),
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
@@ -533,99 +389,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: Column(
-                      children: _recentSessions.map((session) {
-                        final duration = session.endTime != null
-                            ? session.endTime!.difference(session.startTime)
-                            : DateTime.now().difference(session.startTime);
-                        final hours = duration.inHours;
-                        final minutes = duration.inMinutes % 60;
-                        final seconds = duration.inSeconds % 60;
-                        String durationStr;
-                        if (hours > 0) {
-                          durationStr = '${hours}h ${minutes}m ${seconds}s';
-                        } else if (minutes > 0) {
-                          durationStr = '${minutes}m ${seconds}s';
-                        } else {
-                          durationStr = '${seconds}s';
-                        }
-
-                        final dateStr = _formatDate(session.startTime);
-
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.md,
-                              vertical: AppSpacing.sm,
-                            ),
-                            leading: CircleAvatar(
-                              backgroundColor: theme.colorScheme.primaryContainer,
-                              child: Text(
-                                session.id.toString(),
-                                style: AppTypography.labelSmallFor(brightness).copyWith(
-                                  color: theme.colorScheme.onPrimaryContainer,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            title: Text(
-                              session.label,
-                              style: AppTypography.bodyMediumFor(brightness).copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            subtitle: Text(
-                              '$dateStr  •  $durationStr  •  ${session.sampleCount} windows',
-                              style: AppTypography.bodySmallFor(brightness).copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => _navigateToSessionDetail(session.id),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-              ] else ...[
-                // Empty state when no sessions
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xl),
-                    child: EmptyState.noData(
-                      action: anyConnected
-                          ? PrimaryButton(
-                              label: 'Start Recording',
-                              leadingIcon: Icons.fiber_manual_record,
-                              showArrow: true,
-                              onPressed: _navigateToRecord,
-                            )
-                          : null,
-                    ),
+                    child: _buildRecentSessionCard(context, brightness, theme, _recentSessions.first),
                   ),
                 ),
               ],
 
-// ── Primary Recording CTA (always accessible) ──
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.lg,
-                    AppSpacing.md,
-                    AppSpacing.xl,
-                  ),
-                  child: _buildPrimaryCta(
-                    theme,
-                    brightness,
-                    anyConnected,
-                    bothConnected,
-                    modelReady,
+              // ── Bottom Onboarding Card ──
+              if (!anyConnected)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.xl,
+                    ),
+                    child: _buildOnboardingBanner(context, brightness, theme),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -633,119 +414,592 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildPrimaryCta(
-    ThemeData theme,
-    Brightness brightness,
-    bool anyConnected,
-    bool bothConnected,
-    bool modelReady,
-  ) {
-    final List<Widget> children = [];
+  // ── Cell 1: Today's Focus (Full Width, 2-Columns) ──
+  Widget _buildBentoCell1(BuildContext context, Brightness brightness, bool anyConnected) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final count = _todaySessionCount;
+    // Pluralization rule: ${count} session when count === 1, and ${count} sessions otherwise.
+    final sessionText = '$count ${count == 1 ? 'Session' : 'Sessions'}';
+    final subtitle = count > 0
+        ? 'Keep going — every session counts'
+        : 'Ready to record your next session';
+    final progress = count > 0 ? (count / 3.0).clamp(0.1, 1.0) : 0.0;
 
-    if (!anyConnected) {
-      // No bands connected - clear guidance
-      children.add(
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: AppRadius.heroCard,
-            border: Border.all(
-              color: theme.colorScheme.outline.withValues(alpha: 0.3),
-              width: 1.5,
-            ),
-            boxShadow: AppShadows.surface,
-          ),
-          child: Column(
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md + 2),
+      decoration: BoxDecoration(
+        color: AppColors.skyBlue(brightness),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: strokeColor, width: 2.0),
+        boxShadow: AppShadows.hard(brightness),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                Icons.sensors_off,
-                size: 48,
-                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: isLight ? Colors.white : const Color(0xFF2E3038),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isLight ? const Color(0xFF18181B) : Colors.white24,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.directions_run,
+                      size: 18,
+                      color: isLight ? const Color(0xFF18181B) : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Today's Focus",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: isLight ? const Color(0xFF18181B) : Colors.white,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                'Connect a band to begin',
-                style: AppTypography.h3For(brightness).copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
+              if (anyConnected)
+                GestureDetector(
+                  onTap: _navigateToRecord,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryAccent(brightness),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isLight ? const Color(0xFF18181B) : Colors.transparent,
+                        width: 1.5,
+                      ),
+                      boxShadow: AppShadows.hardSm(brightness),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.fiber_manual_record, size: 10, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text(
+                          'Record',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Power on your Wrist or Ankle band and it will appear here automatically.',
-                style: AppTypography.bodyMediumFor(brightness).copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              PrimaryButton(
-                label: 'Open Band Settings',
-                leadingIcon: Icons.settings_outlined,
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const DevicesScreen()),
-                  );
-                },
-              ),
             ],
           ),
-        ),
-      );
-    } else if (!modelReady && bothConnected) {
-      // Bands connected but no model
-      children.add(
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
-            borderRadius: AppRadius.heroCard,
-            border: Border.all(
-              color: theme.colorScheme.primary.withValues(alpha: 0.5),
-              width: 1.5,
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            sessionText,
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: isLight ? const Color(0xFF18181B) : Colors.white,
+              letterSpacing: -0.6,
             ),
           ),
-          child: Column(
-            children: [
-              Icon(
-                Icons.psychology_outlined,
-                size: 40,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                'Model not trained yet',
-                style: AppTypography.h3For(brightness).copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isLight ? const Color(0xFF1E293B) : const Color(0xFF94A3B8),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // Small progress indicator bar
+          Container(
+            height: 6,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: isLight
+                  ? Colors.black.withValues(alpha: 0.1)
+                  : Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: progress,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.primaryAccent(brightness),
+                  borderRadius: BorderRadius.circular(3),
                 ),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Record some sessions in the Collect tab, then train a model from the Dashboard to enable activity recognition.',
-                style: AppTypography.bodyMediumFor(brightness).copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Bento Row 2 & 3: Windows Processed & Model Readiness (50% / 50% split) ──
+  Widget _buildBentoRow2and3(BuildContext context, Brightness brightness, ThemeData theme) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+
+    // Cell 2: Windows Processed
+    final formattedWindows = _formatNumber(_totalWindows);
+
+    // Cell 3: Model Readiness (Eliminate redundant labels!)
+    final modelStatusText = _ml.isCombinedTrained
+        ? 'Dual-Band'
+        : _ml.isTrained
+            ? 'Single-Band'
+            : 'Untrained';
+
+    return Row(
+      children: [
+        // Cell 2: Windows Processed (1-column, 50% Width)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: isLight ? Colors.white : theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: strokeColor, width: 2.0),
+              boxShadow: AppShadows.hard(brightness),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.data_array_rounded,
+                      size: 18,
+                      color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Data Windows',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              PrimaryButton(
-                label: 'Record Training Data',
-                leadingIcon: Icons.fiber_manual_record,
-                showArrow: true,
-                onPressed: _navigateToRecord,
-              ),
-            ],
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  formattedWindows,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    color: isLight ? const Color(0xFF18181B) : Colors.white,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Ready for training',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      );
+        const SizedBox(width: AppSpacing.sm),
+        // Cell 3: Model Readiness (1-column, 50% Width)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.softLavender(brightness),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: strokeColor, width: 2.0),
+              boxShadow: AppShadows.hard(brightness),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.psychology_outlined,
+                      size: 18,
+                      color: isLight ? const Color(0xFF3B0764) : const Color(0xFFE9D5FF),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'ML Model',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isLight ? const Color(0xFF3B0764) : const Color(0xFFE9D5FF),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  modelStatusText,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: isLight ? const Color(0xFF18181B) : Colors.white,
+                    letterSpacing: -0.4,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => TrainingScreen()),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isLight ? const Color(0xFF18181B) : Colors.transparent,
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Text(
+                      _ml.isTrained || _ml.isCombinedTrained ? 'Retrain →' : 'Train Now →',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: isLight ? Colors.white : const Color(0xFF18181B),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Cell 4: Latest Activity (Full Width, 2-Columns) ──
+  Widget _buildBentoCell4(BuildContext context, Brightness brightness, ThemeData theme) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+
+    final latest = _recentSessions.isNotEmpty ? _recentSessions.first : null;
+    final duration = latest != null
+        ? (latest.endTime != null
+            ? latest.endTime!.difference(latest.startTime)
+            : DateTime.now().difference(latest.startTime))
+        : Duration.zero;
+
+    final mins = duration.inMinutes;
+    final secs = duration.inSeconds % 60;
+    final durStr = mins > 0 ? '${mins}m ${secs}s' : '${secs}s';
+    final timeStr = latest != null ? _formatTime(latest.startTime) : '--:--';
+
+    return InkWell(
+      onTap: latest != null ? () => _navigateToSessionDetail(latest.id) : null,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 14),
+        decoration: BoxDecoration(
+          color: isLight ? Colors.white : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: strokeColor, width: 2.0),
+          boxShadow: AppShadows.hard(brightness),
+        ),
+        child: latest != null
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Left: Activity Tag (Walking with icon) + Duration (1m 58s)
+                  Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryAccent(brightness).withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.directions_walk_rounded,
+                          size: 20,
+                          color: AppColors.primaryAccent(brightness),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            latest.label,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: isLight ? const Color(0xFF18181B) : Colors.white,
+                            ),
+                          ),
+                          Text(
+                            durStr,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  // Right: Timestamp (01:02 AM) + Chevron
+                  Row(
+                    children: [
+                      Text(
+                        timeStr,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: isLight ? const Color(0xFF18181B) : Colors.white70,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: isLight ? const Color(0xFF18181B) : Colors.white70,
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.history_toggle_off,
+                        size: 20,
+                        color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'No recorded activity yet',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    'Record to begin →',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primaryAccent(brightness),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ── Recent Sessions: Single Clean Clickable Card ──
+  Widget _buildRecentSessionCard(
+    BuildContext context,
+    Brightness brightness,
+    ThemeData theme,
+    Session session,
+  ) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+
+    final duration = session.endTime != null
+        ? session.endTime!.difference(session.startTime)
+        : DateTime.now().difference(session.startTime);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes % 60;
+    final seconds = duration.inSeconds % 60;
+    String durationStr;
+    if (hours > 0) {
+      durationStr = '${hours}h ${minutes}m ${seconds}s';
+    } else if (minutes > 0) {
+      durationStr = '${minutes}m ${seconds}s';
+    } else {
+      durationStr = '${seconds}s';
     }
 
-    return Column(children: children);
+    final dateStr = _formatDate(session.startTime);
+
+    return InkWell(
+      onTap: () => _navigateToSessionDetail(session.id),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm + 4),
+        decoration: BoxDecoration(
+          color: isLight ? Colors.white : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: strokeColor, width: 2.0),
+          boxShadow: AppShadows.hard(brightness),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: AppColors.primaryAccent(brightness).withValues(alpha: 0.15),
+              child: Text(
+                session.id.toString(),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primaryAccent(brightness),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    session.label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: isLight ? const Color(0xFF18181B) : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$dateStr • $durationStr • ${_formatNumber(session.sampleCount)} windows',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              size: 22,
+              color: isLight ? const Color(0xFF18181B) : Colors.white70,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Bottom Onboarding Banner ──
+  Widget _buildOnboardingBanner(BuildContext context, Brightness brightness, ThemeData theme) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.white : theme.colorScheme.surface,
+        borderRadius: AppRadius.bentoCard,
+        border: Border.all(color: strokeColor, width: 2.0),
+        boxShadow: AppShadows.hard(brightness),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: AppColors.primaryAccent(brightness).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.bluetooth_searching,
+              size: 30,
+              color: AppColors.primaryAccent(brightness),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Pair Your BANDANA Bands',
+            style: AppTypography.h3For(brightness).copyWith(
+              color: theme.colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Power on your Wrist or Ankle band to start streaming motion and posture telemetry.',
+            style: AppTypography.bodyMediumFor(brightness).copyWith(
+              color: isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          PrimaryButton(
+            label: 'Open Band Settings',
+            leadingIcon: Icons.settings_outlined,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DevicesScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatNumber(int number) {
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  String _formatTime(DateTime dt) {
+    final hour = dt.hour;
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    return '${h12.toString().padLeft(2, '0')}:$minute $period';
   }
 
   String _formatDate(DateTime dt) {

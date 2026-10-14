@@ -30,6 +30,18 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _participantIdMeta = const VerificationMeta(
+    'participantId',
+  );
+  @override
+  late final GeneratedColumn<String> participantId = GeneratedColumn<String>(
+    'participant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('participant_1'),
+  );
   static const VerificationMeta _startTimeMeta = const VerificationMeta(
     'startTime',
   );
@@ -77,6 +89,7 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
   List<GeneratedColumn> get $columns => [
     id,
     label,
+    participantId,
     startTime,
     endTime,
     sampleCount,
@@ -104,6 +117,15 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
       );
     } else if (isInserting) {
       context.missing(_labelMeta);
+    }
+    if (data.containsKey('participant_id')) {
+      context.handle(
+        _participantIdMeta,
+        participantId.isAcceptableOrUnknown(
+          data['participant_id']!,
+          _participantIdMeta,
+        ),
+      );
     }
     if (data.containsKey('start_time')) {
       context.handle(
@@ -151,6 +173,10 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
         DriftSqlType.string,
         data['${effectivePrefix}label'],
       )!,
+      participantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}participant_id'],
+      )!,
       startTime: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}start_time'],
@@ -179,6 +205,7 @@ class $SessionsTable extends Sessions with TableInfo<$SessionsTable, Session> {
 class Session extends DataClass implements Insertable<Session> {
   final int id;
   final String label;
+  final String participantId;
   final DateTime startTime;
   final DateTime? endTime;
   final int sampleCount;
@@ -186,6 +213,7 @@ class Session extends DataClass implements Insertable<Session> {
   const Session({
     required this.id,
     required this.label,
+    required this.participantId,
     required this.startTime,
     this.endTime,
     required this.sampleCount,
@@ -196,6 +224,7 @@ class Session extends DataClass implements Insertable<Session> {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['label'] = Variable<String>(label);
+    map['participant_id'] = Variable<String>(participantId);
     map['start_time'] = Variable<DateTime>(startTime);
     if (!nullToAbsent || endTime != null) {
       map['end_time'] = Variable<DateTime>(endTime);
@@ -211,6 +240,7 @@ class Session extends DataClass implements Insertable<Session> {
     return SessionsCompanion(
       id: Value(id),
       label: Value(label),
+      participantId: Value(participantId),
       startTime: Value(startTime),
       endTime: endTime == null && nullToAbsent
           ? const Value.absent()
@@ -230,6 +260,7 @@ class Session extends DataClass implements Insertable<Session> {
     return Session(
       id: serializer.fromJson<int>(json['id']),
       label: serializer.fromJson<String>(json['label']),
+      participantId: serializer.fromJson<String>(json['participantId']),
       startTime: serializer.fromJson<DateTime>(json['startTime']),
       endTime: serializer.fromJson<DateTime?>(json['endTime']),
       sampleCount: serializer.fromJson<int>(json['sampleCount']),
@@ -242,6 +273,7 @@ class Session extends DataClass implements Insertable<Session> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'label': serializer.toJson<String>(label),
+      'participantId': serializer.toJson<String>(participantId),
       'startTime': serializer.toJson<DateTime>(startTime),
       'endTime': serializer.toJson<DateTime?>(endTime),
       'sampleCount': serializer.toJson<int>(sampleCount),
@@ -252,6 +284,7 @@ class Session extends DataClass implements Insertable<Session> {
   Session copyWith({
     int? id,
     String? label,
+    String? participantId,
     DateTime? startTime,
     Value<DateTime?> endTime = const Value.absent(),
     int? sampleCount,
@@ -259,6 +292,7 @@ class Session extends DataClass implements Insertable<Session> {
   }) => Session(
     id: id ?? this.id,
     label: label ?? this.label,
+    participantId: participantId ?? this.participantId,
     startTime: startTime ?? this.startTime,
     endTime: endTime.present ? endTime.value : this.endTime,
     sampleCount: sampleCount ?? this.sampleCount,
@@ -268,6 +302,9 @@ class Session extends DataClass implements Insertable<Session> {
     return Session(
       id: data.id.present ? data.id.value : this.id,
       label: data.label.present ? data.label.value : this.label,
+      participantId: data.participantId.present
+          ? data.participantId.value
+          : this.participantId,
       startTime: data.startTime.present ? data.startTime.value : this.startTime,
       endTime: data.endTime.present ? data.endTime.value : this.endTime,
       sampleCount: data.sampleCount.present
@@ -282,6 +319,7 @@ class Session extends DataClass implements Insertable<Session> {
     return (StringBuffer('Session(')
           ..write('id: $id, ')
           ..write('label: $label, ')
+          ..write('participantId: $participantId, ')
           ..write('startTime: $startTime, ')
           ..write('endTime: $endTime, ')
           ..write('sampleCount: $sampleCount, ')
@@ -291,14 +329,22 @@ class Session extends DataClass implements Insertable<Session> {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, label, startTime, endTime, sampleCount, notes);
+  int get hashCode => Object.hash(
+    id,
+    label,
+    participantId,
+    startTime,
+    endTime,
+    sampleCount,
+    notes,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Session &&
           other.id == this.id &&
           other.label == this.label &&
+          other.participantId == this.participantId &&
           other.startTime == this.startTime &&
           other.endTime == this.endTime &&
           other.sampleCount == this.sampleCount &&
@@ -308,6 +354,7 @@ class Session extends DataClass implements Insertable<Session> {
 class SessionsCompanion extends UpdateCompanion<Session> {
   final Value<int> id;
   final Value<String> label;
+  final Value<String> participantId;
   final Value<DateTime> startTime;
   final Value<DateTime?> endTime;
   final Value<int> sampleCount;
@@ -315,6 +362,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   const SessionsCompanion({
     this.id = const Value.absent(),
     this.label = const Value.absent(),
+    this.participantId = const Value.absent(),
     this.startTime = const Value.absent(),
     this.endTime = const Value.absent(),
     this.sampleCount = const Value.absent(),
@@ -323,6 +371,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   SessionsCompanion.insert({
     this.id = const Value.absent(),
     required String label,
+    this.participantId = const Value.absent(),
     required DateTime startTime,
     this.endTime = const Value.absent(),
     this.sampleCount = const Value.absent(),
@@ -332,6 +381,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   static Insertable<Session> custom({
     Expression<int>? id,
     Expression<String>? label,
+    Expression<String>? participantId,
     Expression<DateTime>? startTime,
     Expression<DateTime>? endTime,
     Expression<int>? sampleCount,
@@ -340,6 +390,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (label != null) 'label': label,
+      if (participantId != null) 'participant_id': participantId,
       if (startTime != null) 'start_time': startTime,
       if (endTime != null) 'end_time': endTime,
       if (sampleCount != null) 'sample_count': sampleCount,
@@ -350,6 +401,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
   SessionsCompanion copyWith({
     Value<int>? id,
     Value<String>? label,
+    Value<String>? participantId,
     Value<DateTime>? startTime,
     Value<DateTime?>? endTime,
     Value<int>? sampleCount,
@@ -358,6 +410,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     return SessionsCompanion(
       id: id ?? this.id,
       label: label ?? this.label,
+      participantId: participantId ?? this.participantId,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       sampleCount: sampleCount ?? this.sampleCount,
@@ -373,6 +426,9 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     }
     if (label.present) {
       map['label'] = Variable<String>(label.value);
+    }
+    if (participantId.present) {
+      map['participant_id'] = Variable<String>(participantId.value);
     }
     if (startTime.present) {
       map['start_time'] = Variable<DateTime>(startTime.value);
@@ -394,6 +450,7 @@ class SessionsCompanion extends UpdateCompanion<Session> {
     return (StringBuffer('SessionsCompanion(')
           ..write('id: $id, ')
           ..write('label: $label, ')
+          ..write('participantId: $participantId, ')
           ..write('startTime: $startTime, ')
           ..write('endTime: $endTime, ')
           ..write('sampleCount: $sampleCount, ')
@@ -545,6 +602,17 @@ class $ImuSampleRecordsTable extends ImuSampleRecords
     type: DriftSqlType.double,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _captureTimestampMsMeta =
+      const VerificationMeta('captureTimestampMs');
+  @override
+  late final GeneratedColumn<int> captureTimestampMs = GeneratedColumn<int>(
+    'capture_timestamp_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(-1),
+  );
   static const VerificationMeta _timestampMeta = const VerificationMeta(
     'timestamp',
   );
@@ -571,6 +639,7 @@ class $ImuSampleRecordsTable extends ImuSampleRecords
     gz,
     accelMagnitude,
     gyroMagnitude,
+    captureTimestampMs,
     timestamp,
   ];
   @override
@@ -672,6 +741,15 @@ class $ImuSampleRecordsTable extends ImuSampleRecords
     } else if (isInserting) {
       context.missing(_gyroMagnitudeMeta);
     }
+    if (data.containsKey('capture_timestamp_ms')) {
+      context.handle(
+        _captureTimestampMsMeta,
+        captureTimestampMs.isAcceptableOrUnknown(
+          data['capture_timestamp_ms']!,
+          _captureTimestampMsMeta,
+        ),
+      );
+    }
     if (data.containsKey('timestamp')) {
       context.handle(
         _timestampMeta,
@@ -741,6 +819,10 @@ class $ImuSampleRecordsTable extends ImuSampleRecords
         DriftSqlType.double,
         data['${effectivePrefix}gyro_magnitude'],
       )!,
+      captureTimestampMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}capture_timestamp_ms'],
+      )!,
       timestamp: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}timestamp'],
@@ -768,6 +850,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
   final double gz;
   final double accelMagnitude;
   final double gyroMagnitude;
+  final int captureTimestampMs;
   final DateTime timestamp;
   const ImuSampleRecord({
     required this.id,
@@ -783,6 +866,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
     required this.gz,
     required this.accelMagnitude,
     required this.gyroMagnitude,
+    required this.captureTimestampMs,
     required this.timestamp,
   });
   @override
@@ -801,6 +885,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
     map['gz'] = Variable<double>(gz);
     map['accel_magnitude'] = Variable<double>(accelMagnitude);
     map['gyro_magnitude'] = Variable<double>(gyroMagnitude);
+    map['capture_timestamp_ms'] = Variable<int>(captureTimestampMs);
     map['timestamp'] = Variable<DateTime>(timestamp);
     return map;
   }
@@ -820,6 +905,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
       gz: Value(gz),
       accelMagnitude: Value(accelMagnitude),
       gyroMagnitude: Value(gyroMagnitude),
+      captureTimestampMs: Value(captureTimestampMs),
       timestamp: Value(timestamp),
     );
   }
@@ -843,6 +929,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
       gz: serializer.fromJson<double>(json['gz']),
       accelMagnitude: serializer.fromJson<double>(json['accelMagnitude']),
       gyroMagnitude: serializer.fromJson<double>(json['gyroMagnitude']),
+      captureTimestampMs: serializer.fromJson<int>(json['captureTimestampMs']),
       timestamp: serializer.fromJson<DateTime>(json['timestamp']),
     );
   }
@@ -863,6 +950,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
       'gz': serializer.toJson<double>(gz),
       'accelMagnitude': serializer.toJson<double>(accelMagnitude),
       'gyroMagnitude': serializer.toJson<double>(gyroMagnitude),
+      'captureTimestampMs': serializer.toJson<int>(captureTimestampMs),
       'timestamp': serializer.toJson<DateTime>(timestamp),
     };
   }
@@ -881,6 +969,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
     double? gz,
     double? accelMagnitude,
     double? gyroMagnitude,
+    int? captureTimestampMs,
     DateTime? timestamp,
   }) => ImuSampleRecord(
     id: id ?? this.id,
@@ -896,6 +985,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
     gz: gz ?? this.gz,
     accelMagnitude: accelMagnitude ?? this.accelMagnitude,
     gyroMagnitude: gyroMagnitude ?? this.gyroMagnitude,
+    captureTimestampMs: captureTimestampMs ?? this.captureTimestampMs,
     timestamp: timestamp ?? this.timestamp,
   );
   ImuSampleRecord copyWithCompanion(ImuSampleRecordsCompanion data) {
@@ -919,6 +1009,9 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
       gyroMagnitude: data.gyroMagnitude.present
           ? data.gyroMagnitude.value
           : this.gyroMagnitude,
+      captureTimestampMs: data.captureTimestampMs.present
+          ? data.captureTimestampMs.value
+          : this.captureTimestampMs,
       timestamp: data.timestamp.present ? data.timestamp.value : this.timestamp,
     );
   }
@@ -939,6 +1032,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
           ..write('gz: $gz, ')
           ..write('accelMagnitude: $accelMagnitude, ')
           ..write('gyroMagnitude: $gyroMagnitude, ')
+          ..write('captureTimestampMs: $captureTimestampMs, ')
           ..write('timestamp: $timestamp')
           ..write(')'))
         .toString();
@@ -959,6 +1053,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
     gz,
     accelMagnitude,
     gyroMagnitude,
+    captureTimestampMs,
     timestamp,
   );
   @override
@@ -978,6 +1073,7 @@ class ImuSampleRecord extends DataClass implements Insertable<ImuSampleRecord> {
           other.gz == this.gz &&
           other.accelMagnitude == this.accelMagnitude &&
           other.gyroMagnitude == this.gyroMagnitude &&
+          other.captureTimestampMs == this.captureTimestampMs &&
           other.timestamp == this.timestamp);
 }
 
@@ -995,6 +1091,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
   final Value<double> gz;
   final Value<double> accelMagnitude;
   final Value<double> gyroMagnitude;
+  final Value<int> captureTimestampMs;
   final Value<DateTime> timestamp;
   const ImuSampleRecordsCompanion({
     this.id = const Value.absent(),
@@ -1010,6 +1107,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
     this.gz = const Value.absent(),
     this.accelMagnitude = const Value.absent(),
     this.gyroMagnitude = const Value.absent(),
+    this.captureTimestampMs = const Value.absent(),
     this.timestamp = const Value.absent(),
   });
   ImuSampleRecordsCompanion.insert({
@@ -1026,6 +1124,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
     required double gz,
     required double accelMagnitude,
     required double gyroMagnitude,
+    this.captureTimestampMs = const Value.absent(),
     required DateTime timestamp,
   }) : sessionId = Value(sessionId),
        bandRole = Value(bandRole),
@@ -1054,6 +1153,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
     Expression<double>? gz,
     Expression<double>? accelMagnitude,
     Expression<double>? gyroMagnitude,
+    Expression<int>? captureTimestampMs,
     Expression<DateTime>? timestamp,
   }) {
     return RawValuesInsertable({
@@ -1070,6 +1170,8 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
       if (gz != null) 'gz': gz,
       if (accelMagnitude != null) 'accel_magnitude': accelMagnitude,
       if (gyroMagnitude != null) 'gyro_magnitude': gyroMagnitude,
+      if (captureTimestampMs != null)
+        'capture_timestamp_ms': captureTimestampMs,
       if (timestamp != null) 'timestamp': timestamp,
     });
   }
@@ -1088,6 +1190,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
     Value<double>? gz,
     Value<double>? accelMagnitude,
     Value<double>? gyroMagnitude,
+    Value<int>? captureTimestampMs,
     Value<DateTime>? timestamp,
   }) {
     return ImuSampleRecordsCompanion(
@@ -1104,6 +1207,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
       gz: gz ?? this.gz,
       accelMagnitude: accelMagnitude ?? this.accelMagnitude,
       gyroMagnitude: gyroMagnitude ?? this.gyroMagnitude,
+      captureTimestampMs: captureTimestampMs ?? this.captureTimestampMs,
       timestamp: timestamp ?? this.timestamp,
     );
   }
@@ -1150,6 +1254,9 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
     if (gyroMagnitude.present) {
       map['gyro_magnitude'] = Variable<double>(gyroMagnitude.value);
     }
+    if (captureTimestampMs.present) {
+      map['capture_timestamp_ms'] = Variable<int>(captureTimestampMs.value);
+    }
     if (timestamp.present) {
       map['timestamp'] = Variable<DateTime>(timestamp.value);
     }
@@ -1172,6 +1279,7 @@ class ImuSampleRecordsCompanion extends UpdateCompanion<ImuSampleRecord> {
           ..write('gz: $gz, ')
           ..write('accelMagnitude: $accelMagnitude, ')
           ..write('gyroMagnitude: $gyroMagnitude, ')
+          ..write('captureTimestampMs: $captureTimestampMs, ')
           ..write('timestamp: $timestamp')
           ..write(')'))
         .toString();
@@ -1579,6 +1687,590 @@ class SensorWindowsCompanion extends UpdateCompanion<SensorWindow> {
   }
 }
 
+class $PredictionFeedbacksTable extends PredictionFeedbacks
+    with TableInfo<$PredictionFeedbacksTable, PredictionFeedback> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PredictionFeedbacksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _predictedLabelMeta = const VerificationMeta(
+    'predictedLabel',
+  );
+  @override
+  late final GeneratedColumn<String> predictedLabel = GeneratedColumn<String>(
+    'predicted_label',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userFeedbackMeta = const VerificationMeta(
+    'userFeedback',
+  );
+  @override
+  late final GeneratedColumn<String> userFeedback = GeneratedColumn<String>(
+    'user_feedback',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _correctedLabelMeta = const VerificationMeta(
+    'correctedLabel',
+  );
+  @override
+  late final GeneratedColumn<String> correctedLabel = GeneratedColumn<String>(
+    'corrected_label',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _modelVersionMeta = const VerificationMeta(
+    'modelVersion',
+  );
+  @override
+  late final GeneratedColumn<String> modelVersion = GeneratedColumn<String>(
+    'model_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _confidenceMeta = const VerificationMeta(
+    'confidence',
+  );
+  @override
+  late final GeneratedColumn<double> confidence = GeneratedColumn<double>(
+    'confidence',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<int> sessionId = GeneratedColumn<int>(
+    'session_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES sessions (id)',
+    ),
+  );
+  static const VerificationMeta _timestampMeta = const VerificationMeta(
+    'timestamp',
+  );
+  @override
+  late final GeneratedColumn<DateTime> timestamp = GeneratedColumn<DateTime>(
+    'timestamp',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isReviewedMeta = const VerificationMeta(
+    'isReviewed',
+  );
+  @override
+  late final GeneratedColumn<bool> isReviewed = GeneratedColumn<bool>(
+    'is_reviewed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_reviewed" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    predictedLabel,
+    userFeedback,
+    correctedLabel,
+    modelVersion,
+    confidence,
+    sessionId,
+    timestamp,
+    isReviewed,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'prediction_feedbacks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PredictionFeedback> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('predicted_label')) {
+      context.handle(
+        _predictedLabelMeta,
+        predictedLabel.isAcceptableOrUnknown(
+          data['predicted_label']!,
+          _predictedLabelMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_predictedLabelMeta);
+    }
+    if (data.containsKey('user_feedback')) {
+      context.handle(
+        _userFeedbackMeta,
+        userFeedback.isAcceptableOrUnknown(
+          data['user_feedback']!,
+          _userFeedbackMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_userFeedbackMeta);
+    }
+    if (data.containsKey('corrected_label')) {
+      context.handle(
+        _correctedLabelMeta,
+        correctedLabel.isAcceptableOrUnknown(
+          data['corrected_label']!,
+          _correctedLabelMeta,
+        ),
+      );
+    }
+    if (data.containsKey('model_version')) {
+      context.handle(
+        _modelVersionMeta,
+        modelVersion.isAcceptableOrUnknown(
+          data['model_version']!,
+          _modelVersionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_modelVersionMeta);
+    }
+    if (data.containsKey('confidence')) {
+      context.handle(
+        _confidenceMeta,
+        confidence.isAcceptableOrUnknown(data['confidence']!, _confidenceMeta),
+      );
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    }
+    if (data.containsKey('timestamp')) {
+      context.handle(
+        _timestampMeta,
+        timestamp.isAcceptableOrUnknown(data['timestamp']!, _timestampMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_timestampMeta);
+    }
+    if (data.containsKey('is_reviewed')) {
+      context.handle(
+        _isReviewedMeta,
+        isReviewed.isAcceptableOrUnknown(data['is_reviewed']!, _isReviewedMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PredictionFeedback map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PredictionFeedback(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      predictedLabel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}predicted_label'],
+      )!,
+      userFeedback: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_feedback'],
+      )!,
+      correctedLabel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}corrected_label'],
+      ),
+      modelVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}model_version'],
+      )!,
+      confidence: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}confidence'],
+      ),
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}session_id'],
+      ),
+      timestamp: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}timestamp'],
+      )!,
+      isReviewed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_reviewed'],
+      )!,
+    );
+  }
+
+  @override
+  $PredictionFeedbacksTable createAlias(String alias) {
+    return $PredictionFeedbacksTable(attachedDatabase, alias);
+  }
+}
+
+class PredictionFeedback extends DataClass
+    implements Insertable<PredictionFeedback> {
+  final int id;
+  final String predictedLabel;
+  final String userFeedback;
+  final String? correctedLabel;
+  final String modelVersion;
+  final double? confidence;
+  final int? sessionId;
+  final DateTime timestamp;
+  final bool isReviewed;
+  const PredictionFeedback({
+    required this.id,
+    required this.predictedLabel,
+    required this.userFeedback,
+    this.correctedLabel,
+    required this.modelVersion,
+    this.confidence,
+    this.sessionId,
+    required this.timestamp,
+    required this.isReviewed,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['predicted_label'] = Variable<String>(predictedLabel);
+    map['user_feedback'] = Variable<String>(userFeedback);
+    if (!nullToAbsent || correctedLabel != null) {
+      map['corrected_label'] = Variable<String>(correctedLabel);
+    }
+    map['model_version'] = Variable<String>(modelVersion);
+    if (!nullToAbsent || confidence != null) {
+      map['confidence'] = Variable<double>(confidence);
+    }
+    if (!nullToAbsent || sessionId != null) {
+      map['session_id'] = Variable<int>(sessionId);
+    }
+    map['timestamp'] = Variable<DateTime>(timestamp);
+    map['is_reviewed'] = Variable<bool>(isReviewed);
+    return map;
+  }
+
+  PredictionFeedbacksCompanion toCompanion(bool nullToAbsent) {
+    return PredictionFeedbacksCompanion(
+      id: Value(id),
+      predictedLabel: Value(predictedLabel),
+      userFeedback: Value(userFeedback),
+      correctedLabel: correctedLabel == null && nullToAbsent
+          ? const Value.absent()
+          : Value(correctedLabel),
+      modelVersion: Value(modelVersion),
+      confidence: confidence == null && nullToAbsent
+          ? const Value.absent()
+          : Value(confidence),
+      sessionId: sessionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sessionId),
+      timestamp: Value(timestamp),
+      isReviewed: Value(isReviewed),
+    );
+  }
+
+  factory PredictionFeedback.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PredictionFeedback(
+      id: serializer.fromJson<int>(json['id']),
+      predictedLabel: serializer.fromJson<String>(json['predictedLabel']),
+      userFeedback: serializer.fromJson<String>(json['userFeedback']),
+      correctedLabel: serializer.fromJson<String?>(json['correctedLabel']),
+      modelVersion: serializer.fromJson<String>(json['modelVersion']),
+      confidence: serializer.fromJson<double?>(json['confidence']),
+      sessionId: serializer.fromJson<int?>(json['sessionId']),
+      timestamp: serializer.fromJson<DateTime>(json['timestamp']),
+      isReviewed: serializer.fromJson<bool>(json['isReviewed']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'predictedLabel': serializer.toJson<String>(predictedLabel),
+      'userFeedback': serializer.toJson<String>(userFeedback),
+      'correctedLabel': serializer.toJson<String?>(correctedLabel),
+      'modelVersion': serializer.toJson<String>(modelVersion),
+      'confidence': serializer.toJson<double?>(confidence),
+      'sessionId': serializer.toJson<int?>(sessionId),
+      'timestamp': serializer.toJson<DateTime>(timestamp),
+      'isReviewed': serializer.toJson<bool>(isReviewed),
+    };
+  }
+
+  PredictionFeedback copyWith({
+    int? id,
+    String? predictedLabel,
+    String? userFeedback,
+    Value<String?> correctedLabel = const Value.absent(),
+    String? modelVersion,
+    Value<double?> confidence = const Value.absent(),
+    Value<int?> sessionId = const Value.absent(),
+    DateTime? timestamp,
+    bool? isReviewed,
+  }) => PredictionFeedback(
+    id: id ?? this.id,
+    predictedLabel: predictedLabel ?? this.predictedLabel,
+    userFeedback: userFeedback ?? this.userFeedback,
+    correctedLabel: correctedLabel.present
+        ? correctedLabel.value
+        : this.correctedLabel,
+    modelVersion: modelVersion ?? this.modelVersion,
+    confidence: confidence.present ? confidence.value : this.confidence,
+    sessionId: sessionId.present ? sessionId.value : this.sessionId,
+    timestamp: timestamp ?? this.timestamp,
+    isReviewed: isReviewed ?? this.isReviewed,
+  );
+  PredictionFeedback copyWithCompanion(PredictionFeedbacksCompanion data) {
+    return PredictionFeedback(
+      id: data.id.present ? data.id.value : this.id,
+      predictedLabel: data.predictedLabel.present
+          ? data.predictedLabel.value
+          : this.predictedLabel,
+      userFeedback: data.userFeedback.present
+          ? data.userFeedback.value
+          : this.userFeedback,
+      correctedLabel: data.correctedLabel.present
+          ? data.correctedLabel.value
+          : this.correctedLabel,
+      modelVersion: data.modelVersion.present
+          ? data.modelVersion.value
+          : this.modelVersion,
+      confidence: data.confidence.present
+          ? data.confidence.value
+          : this.confidence,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      timestamp: data.timestamp.present ? data.timestamp.value : this.timestamp,
+      isReviewed: data.isReviewed.present
+          ? data.isReviewed.value
+          : this.isReviewed,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PredictionFeedback(')
+          ..write('id: $id, ')
+          ..write('predictedLabel: $predictedLabel, ')
+          ..write('userFeedback: $userFeedback, ')
+          ..write('correctedLabel: $correctedLabel, ')
+          ..write('modelVersion: $modelVersion, ')
+          ..write('confidence: $confidence, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('timestamp: $timestamp, ')
+          ..write('isReviewed: $isReviewed')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    predictedLabel,
+    userFeedback,
+    correctedLabel,
+    modelVersion,
+    confidence,
+    sessionId,
+    timestamp,
+    isReviewed,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PredictionFeedback &&
+          other.id == this.id &&
+          other.predictedLabel == this.predictedLabel &&
+          other.userFeedback == this.userFeedback &&
+          other.correctedLabel == this.correctedLabel &&
+          other.modelVersion == this.modelVersion &&
+          other.confidence == this.confidence &&
+          other.sessionId == this.sessionId &&
+          other.timestamp == this.timestamp &&
+          other.isReviewed == this.isReviewed);
+}
+
+class PredictionFeedbacksCompanion extends UpdateCompanion<PredictionFeedback> {
+  final Value<int> id;
+  final Value<String> predictedLabel;
+  final Value<String> userFeedback;
+  final Value<String?> correctedLabel;
+  final Value<String> modelVersion;
+  final Value<double?> confidence;
+  final Value<int?> sessionId;
+  final Value<DateTime> timestamp;
+  final Value<bool> isReviewed;
+  const PredictionFeedbacksCompanion({
+    this.id = const Value.absent(),
+    this.predictedLabel = const Value.absent(),
+    this.userFeedback = const Value.absent(),
+    this.correctedLabel = const Value.absent(),
+    this.modelVersion = const Value.absent(),
+    this.confidence = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.timestamp = const Value.absent(),
+    this.isReviewed = const Value.absent(),
+  });
+  PredictionFeedbacksCompanion.insert({
+    this.id = const Value.absent(),
+    required String predictedLabel,
+    required String userFeedback,
+    this.correctedLabel = const Value.absent(),
+    required String modelVersion,
+    this.confidence = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    required DateTime timestamp,
+    this.isReviewed = const Value.absent(),
+  }) : predictedLabel = Value(predictedLabel),
+       userFeedback = Value(userFeedback),
+       modelVersion = Value(modelVersion),
+       timestamp = Value(timestamp);
+  static Insertable<PredictionFeedback> custom({
+    Expression<int>? id,
+    Expression<String>? predictedLabel,
+    Expression<String>? userFeedback,
+    Expression<String>? correctedLabel,
+    Expression<String>? modelVersion,
+    Expression<double>? confidence,
+    Expression<int>? sessionId,
+    Expression<DateTime>? timestamp,
+    Expression<bool>? isReviewed,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (predictedLabel != null) 'predicted_label': predictedLabel,
+      if (userFeedback != null) 'user_feedback': userFeedback,
+      if (correctedLabel != null) 'corrected_label': correctedLabel,
+      if (modelVersion != null) 'model_version': modelVersion,
+      if (confidence != null) 'confidence': confidence,
+      if (sessionId != null) 'session_id': sessionId,
+      if (timestamp != null) 'timestamp': timestamp,
+      if (isReviewed != null) 'is_reviewed': isReviewed,
+    });
+  }
+
+  PredictionFeedbacksCompanion copyWith({
+    Value<int>? id,
+    Value<String>? predictedLabel,
+    Value<String>? userFeedback,
+    Value<String?>? correctedLabel,
+    Value<String>? modelVersion,
+    Value<double?>? confidence,
+    Value<int?>? sessionId,
+    Value<DateTime>? timestamp,
+    Value<bool>? isReviewed,
+  }) {
+    return PredictionFeedbacksCompanion(
+      id: id ?? this.id,
+      predictedLabel: predictedLabel ?? this.predictedLabel,
+      userFeedback: userFeedback ?? this.userFeedback,
+      correctedLabel: correctedLabel ?? this.correctedLabel,
+      modelVersion: modelVersion ?? this.modelVersion,
+      confidence: confidence ?? this.confidence,
+      sessionId: sessionId ?? this.sessionId,
+      timestamp: timestamp ?? this.timestamp,
+      isReviewed: isReviewed ?? this.isReviewed,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (predictedLabel.present) {
+      map['predicted_label'] = Variable<String>(predictedLabel.value);
+    }
+    if (userFeedback.present) {
+      map['user_feedback'] = Variable<String>(userFeedback.value);
+    }
+    if (correctedLabel.present) {
+      map['corrected_label'] = Variable<String>(correctedLabel.value);
+    }
+    if (modelVersion.present) {
+      map['model_version'] = Variable<String>(modelVersion.value);
+    }
+    if (confidence.present) {
+      map['confidence'] = Variable<double>(confidence.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<int>(sessionId.value);
+    }
+    if (timestamp.present) {
+      map['timestamp'] = Variable<DateTime>(timestamp.value);
+    }
+    if (isReviewed.present) {
+      map['is_reviewed'] = Variable<bool>(isReviewed.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PredictionFeedbacksCompanion(')
+          ..write('id: $id, ')
+          ..write('predictedLabel: $predictedLabel, ')
+          ..write('userFeedback: $userFeedback, ')
+          ..write('correctedLabel: $correctedLabel, ')
+          ..write('modelVersion: $modelVersion, ')
+          ..write('confidence: $confidence, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('timestamp: $timestamp, ')
+          ..write('isReviewed: $isReviewed')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$DatabaseService extends GeneratedDatabase {
   _$DatabaseService(QueryExecutor e) : super(e);
   $DatabaseServiceManager get managers => $DatabaseServiceManager(this);
@@ -1587,6 +2279,8 @@ abstract class _$DatabaseService extends GeneratedDatabase {
     this,
   );
   late final $SensorWindowsTable sensorWindows = $SensorWindowsTable(this);
+  late final $PredictionFeedbacksTable predictionFeedbacks =
+      $PredictionFeedbacksTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1595,6 +2289,7 @@ abstract class _$DatabaseService extends GeneratedDatabase {
     sessions,
     imuSampleRecords,
     sensorWindows,
+    predictionFeedbacks,
   ];
 }
 
@@ -1602,6 +2297,7 @@ typedef $$SessionsTableCreateCompanionBuilder =
     SessionsCompanion Function({
       Value<int> id,
       required String label,
+      Value<String> participantId,
       required DateTime startTime,
       Value<DateTime?> endTime,
       Value<int> sampleCount,
@@ -1611,6 +2307,7 @@ typedef $$SessionsTableUpdateCompanionBuilder =
     SessionsCompanion Function({
       Value<int> id,
       Value<String> label,
+      Value<String> participantId,
       Value<DateTime> startTime,
       Value<DateTime?> endTime,
       Value<int> sampleCount,
@@ -1660,6 +2357,30 @@ final class $$SessionsTableReferences
       manager.$state.copyWith(prefetchedData: cache),
     );
   }
+
+  static MultiTypedResultKey<
+    $PredictionFeedbacksTable,
+    List<PredictionFeedback>
+  >
+  _predictionFeedbacksRefsTable(_$DatabaseService db) =>
+      MultiTypedResultKey.fromTable(
+        db.predictionFeedbacks,
+        aliasName: 'sessions__id__prediction_feedbacks__session_id',
+      );
+
+  $$PredictionFeedbacksTableProcessedTableManager get predictionFeedbacksRefs {
+    final manager = $$PredictionFeedbacksTableTableManager(
+      $_db,
+      $_db.predictionFeedbacks,
+    ).filter((f) => f.sessionId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _predictionFeedbacksRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 }
 
 class $$SessionsTableFilterComposer
@@ -1678,6 +2399,11 @@ class $$SessionsTableFilterComposer
 
   ColumnFilters<String> get label => $composableBuilder(
     column: $table.label,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get participantId => $composableBuilder(
+    column: $table.participantId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1750,6 +2476,31 @@ class $$SessionsTableFilterComposer
     );
     return f(composer);
   }
+
+  Expression<bool> predictionFeedbacksRefs(
+    Expression<bool> Function($$PredictionFeedbacksTableFilterComposer f) f,
+  ) {
+    final $$PredictionFeedbacksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.predictionFeedbacks,
+      getReferencedColumn: (t) => t.sessionId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PredictionFeedbacksTableFilterComposer(
+            $db: $db,
+            $table: $db.predictionFeedbacks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$SessionsTableOrderingComposer
@@ -1768,6 +2519,11 @@ class $$SessionsTableOrderingComposer
 
   ColumnOrderings<String> get label => $composableBuilder(
     column: $table.label,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get participantId => $composableBuilder(
+    column: $table.participantId,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -1806,6 +2562,11 @@ class $$SessionsTableAnnotationComposer
 
   GeneratedColumn<String> get label =>
       $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<String> get participantId => $composableBuilder(
+    column: $table.participantId,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get startTime =>
       $composableBuilder(column: $table.startTime, builder: (column) => column);
@@ -1870,6 +2631,32 @@ class $$SessionsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> predictionFeedbacksRefs<T extends Object>(
+    Expression<T> Function($$PredictionFeedbacksTableAnnotationComposer a) f,
+  ) {
+    final $$PredictionFeedbacksTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.predictionFeedbacks,
+          getReferencedColumn: (t) => t.sessionId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$PredictionFeedbacksTableAnnotationComposer(
+                $db: $db,
+                $table: $db.predictionFeedbacks,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$SessionsTableTableManager
@@ -1888,6 +2675,7 @@ class $$SessionsTableTableManager
           PrefetchHooks Function({
             bool imuSampleRecordsRefs,
             bool sensorWindowsRefs,
+            bool predictionFeedbacksRefs,
           })
         > {
   $$SessionsTableTableManager(_$DatabaseService db, $SessionsTable table)
@@ -1905,6 +2693,7 @@ class $$SessionsTableTableManager
               ({
                 Value<int> id = const Value.absent(),
                 Value<String> label = const Value.absent(),
+                Value<String> participantId = const Value.absent(),
                 Value<DateTime> startTime = const Value.absent(),
                 Value<DateTime?> endTime = const Value.absent(),
                 Value<int> sampleCount = const Value.absent(),
@@ -1912,6 +2701,7 @@ class $$SessionsTableTableManager
               }) => SessionsCompanion(
                 id: id,
                 label: label,
+                participantId: participantId,
                 startTime: startTime,
                 endTime: endTime,
                 sampleCount: sampleCount,
@@ -1921,6 +2711,7 @@ class $$SessionsTableTableManager
               ({
                 Value<int> id = const Value.absent(),
                 required String label,
+                Value<String> participantId = const Value.absent(),
                 required DateTime startTime,
                 Value<DateTime?> endTime = const Value.absent(),
                 Value<int> sampleCount = const Value.absent(),
@@ -1928,6 +2719,7 @@ class $$SessionsTableTableManager
               }) => SessionsCompanion.insert(
                 id: id,
                 label: label,
+                participantId: participantId,
                 startTime: startTime,
                 endTime: endTime,
                 sampleCount: sampleCount,
@@ -1942,12 +2734,17 @@ class $$SessionsTableTableManager
               )
               .toList(),
           prefetchHooksCallback:
-              ({imuSampleRecordsRefs = false, sensorWindowsRefs = false}) {
+              ({
+                imuSampleRecordsRefs = false,
+                sensorWindowsRefs = false,
+                predictionFeedbacksRefs = false,
+              }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (imuSampleRecordsRefs) db.imuSampleRecords,
                     if (sensorWindowsRefs) db.sensorWindows,
+                    if (predictionFeedbacksRefs) db.predictionFeedbacks,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -1994,6 +2791,27 @@ class $$SessionsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (predictionFeedbacksRefs)
+                        await $_getPrefetchedData<
+                          Session,
+                          $SessionsTable,
+                          PredictionFeedback
+                        >(
+                          currentTable: table,
+                          referencedTable: $$SessionsTableReferences
+                              ._predictionFeedbacksRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$SessionsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).predictionFeedbacksRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.sessionId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -2017,6 +2835,7 @@ typedef $$SessionsTableProcessedTableManager =
       PrefetchHooks Function({
         bool imuSampleRecordsRefs,
         bool sensorWindowsRefs,
+        bool predictionFeedbacksRefs,
       })
     >;
 typedef $$ImuSampleRecordsTableCreateCompanionBuilder =
@@ -2034,6 +2853,7 @@ typedef $$ImuSampleRecordsTableCreateCompanionBuilder =
       required double gz,
       required double accelMagnitude,
       required double gyroMagnitude,
+      Value<int> captureTimestampMs,
       required DateTime timestamp,
     });
 typedef $$ImuSampleRecordsTableUpdateCompanionBuilder =
@@ -2051,6 +2871,7 @@ typedef $$ImuSampleRecordsTableUpdateCompanionBuilder =
       Value<double> gz,
       Value<double> accelMagnitude,
       Value<double> gyroMagnitude,
+      Value<int> captureTimestampMs,
       Value<DateTime> timestamp,
     });
 
@@ -2154,6 +2975,11 @@ class $$ImuSampleRecordsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get captureTimestampMs => $composableBuilder(
+    column: $table.captureTimestampMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<DateTime> get timestamp => $composableBuilder(
     column: $table.timestamp,
     builder: (column) => ColumnFilters(column),
@@ -2252,6 +3078,11 @@ class $$ImuSampleRecordsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get captureTimestampMs => $composableBuilder(
+    column: $table.captureTimestampMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get timestamp => $composableBuilder(
     column: $table.timestamp,
     builder: (column) => ColumnOrderings(column),
@@ -2332,6 +3163,11 @@ class $$ImuSampleRecordsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get captureTimestampMs => $composableBuilder(
+    column: $table.captureTimestampMs,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get timestamp =>
       $composableBuilder(column: $table.timestamp, builder: (column) => column);
 
@@ -2402,6 +3238,7 @@ class $$ImuSampleRecordsTableTableManager
                 Value<double> gz = const Value.absent(),
                 Value<double> accelMagnitude = const Value.absent(),
                 Value<double> gyroMagnitude = const Value.absent(),
+                Value<int> captureTimestampMs = const Value.absent(),
                 Value<DateTime> timestamp = const Value.absent(),
               }) => ImuSampleRecordsCompanion(
                 id: id,
@@ -2417,6 +3254,7 @@ class $$ImuSampleRecordsTableTableManager
                 gz: gz,
                 accelMagnitude: accelMagnitude,
                 gyroMagnitude: gyroMagnitude,
+                captureTimestampMs: captureTimestampMs,
                 timestamp: timestamp,
               ),
           createCompanionCallback:
@@ -2434,6 +3272,7 @@ class $$ImuSampleRecordsTableTableManager
                 required double gz,
                 required double accelMagnitude,
                 required double gyroMagnitude,
+                Value<int> captureTimestampMs = const Value.absent(),
                 required DateTime timestamp,
               }) => ImuSampleRecordsCompanion.insert(
                 id: id,
@@ -2449,6 +3288,7 @@ class $$ImuSampleRecordsTableTableManager
                 gz: gz,
                 accelMagnitude: accelMagnitude,
                 gyroMagnitude: gyroMagnitude,
+                captureTimestampMs: captureTimestampMs,
                 timestamp: timestamp,
               ),
           withReferenceMapper: (p0) => p0
@@ -2857,6 +3697,424 @@ typedef $$SensorWindowsTableProcessedTableManager =
       SensorWindow,
       PrefetchHooks Function({bool sessionId})
     >;
+typedef $$PredictionFeedbacksTableCreateCompanionBuilder =
+    PredictionFeedbacksCompanion Function({
+      Value<int> id,
+      required String predictedLabel,
+      required String userFeedback,
+      Value<String?> correctedLabel,
+      required String modelVersion,
+      Value<double?> confidence,
+      Value<int?> sessionId,
+      required DateTime timestamp,
+      Value<bool> isReviewed,
+    });
+typedef $$PredictionFeedbacksTableUpdateCompanionBuilder =
+    PredictionFeedbacksCompanion Function({
+      Value<int> id,
+      Value<String> predictedLabel,
+      Value<String> userFeedback,
+      Value<String?> correctedLabel,
+      Value<String> modelVersion,
+      Value<double?> confidence,
+      Value<int?> sessionId,
+      Value<DateTime> timestamp,
+      Value<bool> isReviewed,
+    });
+
+final class $$PredictionFeedbacksTableReferences
+    extends
+        BaseReferences<
+          _$DatabaseService,
+          $PredictionFeedbacksTable,
+          PredictionFeedback
+        > {
+  $$PredictionFeedbacksTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $SessionsTable _sessionIdTable(_$DatabaseService db) =>
+      db.sessions.createAlias('prediction_feedbacks__session_id__sessions__id');
+
+  $$SessionsTableProcessedTableManager? get sessionId {
+    final $_column = $_itemColumn<int>('session_id');
+    if ($_column == null) return null;
+    final manager = $$SessionsTableTableManager(
+      $_db,
+      $_db.sessions,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_sessionIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$PredictionFeedbacksTableFilterComposer
+    extends Composer<_$DatabaseService, $PredictionFeedbacksTable> {
+  $$PredictionFeedbacksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get predictedLabel => $composableBuilder(
+    column: $table.predictedLabel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userFeedback => $composableBuilder(
+    column: $table.userFeedback,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get correctedLabel => $composableBuilder(
+    column: $table.correctedLabel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modelVersion => $composableBuilder(
+    column: $table.modelVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get timestamp => $composableBuilder(
+    column: $table.timestamp,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isReviewed => $composableBuilder(
+    column: $table.isReviewed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$SessionsTableFilterComposer get sessionId {
+    final $$SessionsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableFilterComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PredictionFeedbacksTableOrderingComposer
+    extends Composer<_$DatabaseService, $PredictionFeedbacksTable> {
+  $$PredictionFeedbacksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get predictedLabel => $composableBuilder(
+    column: $table.predictedLabel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userFeedback => $composableBuilder(
+    column: $table.userFeedback,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get correctedLabel => $composableBuilder(
+    column: $table.correctedLabel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modelVersion => $composableBuilder(
+    column: $table.modelVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get timestamp => $composableBuilder(
+    column: $table.timestamp,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isReviewed => $composableBuilder(
+    column: $table.isReviewed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$SessionsTableOrderingComposer get sessionId {
+    final $$SessionsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableOrderingComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PredictionFeedbacksTableAnnotationComposer
+    extends Composer<_$DatabaseService, $PredictionFeedbacksTable> {
+  $$PredictionFeedbacksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get predictedLabel => $composableBuilder(
+    column: $table.predictedLabel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get userFeedback => $composableBuilder(
+    column: $table.userFeedback,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get correctedLabel => $composableBuilder(
+    column: $table.correctedLabel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modelVersion => $composableBuilder(
+    column: $table.modelVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get timestamp =>
+      $composableBuilder(column: $table.timestamp, builder: (column) => column);
+
+  GeneratedColumn<bool> get isReviewed => $composableBuilder(
+    column: $table.isReviewed,
+    builder: (column) => column,
+  );
+
+  $$SessionsTableAnnotationComposer get sessionId {
+    final $$SessionsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PredictionFeedbacksTableTableManager
+    extends
+        RootTableManager<
+          _$DatabaseService,
+          $PredictionFeedbacksTable,
+          PredictionFeedback,
+          $$PredictionFeedbacksTableFilterComposer,
+          $$PredictionFeedbacksTableOrderingComposer,
+          $$PredictionFeedbacksTableAnnotationComposer,
+          $$PredictionFeedbacksTableCreateCompanionBuilder,
+          $$PredictionFeedbacksTableUpdateCompanionBuilder,
+          (PredictionFeedback, $$PredictionFeedbacksTableReferences),
+          PredictionFeedback,
+          PrefetchHooks Function({bool sessionId})
+        > {
+  $$PredictionFeedbacksTableTableManager(
+    _$DatabaseService db,
+    $PredictionFeedbacksTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PredictionFeedbacksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PredictionFeedbacksTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$PredictionFeedbacksTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> predictedLabel = const Value.absent(),
+                Value<String> userFeedback = const Value.absent(),
+                Value<String?> correctedLabel = const Value.absent(),
+                Value<String> modelVersion = const Value.absent(),
+                Value<double?> confidence = const Value.absent(),
+                Value<int?> sessionId = const Value.absent(),
+                Value<DateTime> timestamp = const Value.absent(),
+                Value<bool> isReviewed = const Value.absent(),
+              }) => PredictionFeedbacksCompanion(
+                id: id,
+                predictedLabel: predictedLabel,
+                userFeedback: userFeedback,
+                correctedLabel: correctedLabel,
+                modelVersion: modelVersion,
+                confidence: confidence,
+                sessionId: sessionId,
+                timestamp: timestamp,
+                isReviewed: isReviewed,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String predictedLabel,
+                required String userFeedback,
+                Value<String?> correctedLabel = const Value.absent(),
+                required String modelVersion,
+                Value<double?> confidence = const Value.absent(),
+                Value<int?> sessionId = const Value.absent(),
+                required DateTime timestamp,
+                Value<bool> isReviewed = const Value.absent(),
+              }) => PredictionFeedbacksCompanion.insert(
+                id: id,
+                predictedLabel: predictedLabel,
+                userFeedback: userFeedback,
+                correctedLabel: correctedLabel,
+                modelVersion: modelVersion,
+                confidence: confidence,
+                sessionId: sessionId,
+                timestamp: timestamp,
+                isReviewed: isReviewed,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$PredictionFeedbacksTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({sessionId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (sessionId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.sessionId,
+                                referencedTable:
+                                    $$PredictionFeedbacksTableReferences
+                                        ._sessionIdTable(db),
+                                referencedColumn:
+                                    $$PredictionFeedbacksTableReferences
+                                        ._sessionIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$PredictionFeedbacksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$DatabaseService,
+      $PredictionFeedbacksTable,
+      PredictionFeedback,
+      $$PredictionFeedbacksTableFilterComposer,
+      $$PredictionFeedbacksTableOrderingComposer,
+      $$PredictionFeedbacksTableAnnotationComposer,
+      $$PredictionFeedbacksTableCreateCompanionBuilder,
+      $$PredictionFeedbacksTableUpdateCompanionBuilder,
+      (PredictionFeedback, $$PredictionFeedbacksTableReferences),
+      PredictionFeedback,
+      PrefetchHooks Function({bool sessionId})
+    >;
 
 class $DatabaseServiceManager {
   final _$DatabaseService _db;
@@ -2867,4 +4125,6 @@ class $DatabaseServiceManager {
       $$ImuSampleRecordsTableTableManager(_db, _db.imuSampleRecords);
   $$SensorWindowsTableTableManager get sensorWindows =>
       $$SensorWindowsTableTableManager(_db, _db.sensorWindows);
+  $$PredictionFeedbacksTableTableManager get predictionFeedbacks =>
+      $$PredictionFeedbacksTableTableManager(_db, _db.predictionFeedbacks);
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radius.dart';
 import '../../../core/theme/app_shadows.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -7,8 +8,8 @@ import '../../../core/theme/app_typography.dart';
 
 /// A large, prominent metric card for hero/dashboard metrics.
 ///
-/// Intended for key metrics like "74 min active today" with large visual hierarchy.
-/// Uses larger radius (28px), larger typography, and more generous padding.
+/// Uses Neo-Brutalist Bento design language: pastel sky blue fill (#B8E3FF),
+/// 2px solid border, 4px crisp hard drop shadow, and high-contrast typography.
 class HeroMetricCard extends StatelessWidget {
   /// The metric label (e.g., "Active today", "Today's movement").
   final String label;
@@ -28,16 +29,16 @@ class HeroMetricCard extends StatelessWidget {
   /// Optional trailing action button.
   final Widget? trailingAction;
 
-  /// Color for the value (defaults to primary accent).
+  /// Color for the value (defaults to high-contrast #1A1A1A on light).
   final Color? valueColor;
 
-  /// Color for the label (defaults to onSurfaceVariant).
+  /// Color for the label (defaults to high-contrast #1A1A1A on light).
   final Color? labelColor;
 
-  /// Background color (defaults to surface).
+  /// Background color (defaults to AppColors.metricFill).
   final Color? backgroundColor;
 
-  /// Border color (defaults to theme outline).
+  /// Border color (defaults to 2px solid outline #1A1A1A).
   final Color? borderColor;
 
   /// Gradient background (optional, overrides backgroundColor).
@@ -76,11 +77,10 @@ class HeroMetricCard extends StatelessWidget {
     final brightness = theme.brightness;
     final isLight = brightness == Brightness.light;
 
-    final effectiveBgColor = backgroundColor ?? theme.colorScheme.surface;
-    final effectiveBorderColor = borderColor ??
-        (isLight ? const Color(0xFF111111) : const Color(0xFFF5F3ED));
-    final effectiveValueColor = valueColor ?? theme.colorScheme.primary;
-    final effectiveLabelColor = labelColor ?? theme.colorScheme.onSurfaceVariant;
+    final effectiveBgColor = backgroundColor ?? AppColors.metricFill(brightness);
+    final effectiveBorderColor = borderColor ?? AppColors.surfaceOutline(brightness);
+    final effectiveValueColor = valueColor ?? (isLight ? const Color(0xFF1A1A1A) : Colors.white);
+    final effectiveLabelColor = labelColor ?? (isLight ? const Color(0xFF1A1A1A) : Colors.white70);
 
     Widget cardContent = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -98,7 +98,8 @@ class HeroMetricCard extends StatelessWidget {
                 label,
                 style: AppTypography.h3For(brightness).copyWith(
                   color: effectiveLabelColor,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -118,16 +119,17 @@ class HeroMetricCard extends StatelessWidget {
                 color: effectiveValueColor,
                 fontWeight: FontWeight.w900,
                 fontSize: 56,
+                letterSpacing: -1.5,
               ),
             ),
             if (unit != null) ...[
               const SizedBox(width: AppSpacing.sm),
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   unit!,
-                  style: AppTypography.h2For(brightness).copyWith(
-                    color: effectiveValueColor.withValues(alpha: 0.7),
+                  style: AppTypography.h3For(brightness).copyWith(
+                    color: effectiveValueColor.withValues(alpha: 0.85),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -140,7 +142,8 @@ class HeroMetricCard extends StatelessWidget {
           Text(
             description!,
             style: AppTypography.bodyMediumFor(brightness).copyWith(
-              color: effectiveLabelColor,
+              color: isLight ? const Color(0xFF4A4A4A) : Colors.white70,
+              fontWeight: FontWeight.w500,
             ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -155,8 +158,9 @@ class HeroMetricCard extends StatelessWidget {
         padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
           gradient: gradient,
-          borderRadius: AppRadius.heroCard,
-          boxShadow: AppShadows.raised,
+          borderRadius: AppRadius.bentoCard,
+          border: Border.all(color: effectiveBorderColor, width: 2.0),
+          boxShadow: AppShadows.hard(brightness),
         ),
         child: cardContent,
       );
@@ -165,9 +169,9 @@ class HeroMetricCard extends StatelessWidget {
         padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
           color: effectiveBgColor,
-          borderRadius: AppRadius.heroCard,
-          border: Border.all(color: effectiveBorderColor, width: 1.5),
-          boxShadow: AppShadows.surface,
+          borderRadius: AppRadius.bentoCard,
+          border: Border.all(color: effectiveBorderColor, width: 2.0),
+          boxShadow: AppShadows.hard(brightness),
         ),
         child: cardContent,
       );
@@ -180,7 +184,7 @@ class HeroMetricCard extends StatelessWidget {
         button: true,
         child: InkWell(
           onTap: onTap,
-          borderRadius: AppRadius.heroCard,
+          borderRadius: AppRadius.bentoCard,
           child: card,
         ),
       );

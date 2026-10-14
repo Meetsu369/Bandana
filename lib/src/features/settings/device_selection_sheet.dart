@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-import '../../core/theme/app_spacing.dart';
-import '../../core/theme/app_typography.dart';
 import '../../core/constants/ble_constants.dart';
 
 /// Bottom sheet for selecting a BLE device during assignment.
@@ -159,7 +157,7 @@ class _DeviceSelectionSheetState extends State<DeviceSelectionSheet> {
                         shrinkWrap: true,
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: _devices.length,
-                        separatorBuilder: (_, __) => Divider(height: 1, indent: 16, endIndent: 16),
+                        separatorBuilder: (_, _) => Divider(height: 1, indent: 16, endIndent: 16),
                         itemBuilder: (context, index) {
                           final device = _devices[index];
                           final rssi = device.rssi;
@@ -174,7 +172,7 @@ class _DeviceSelectionSheetState extends State<DeviceSelectionSheet> {
                               child: Icon(widget.role.icon, color: color, size: 20),
                             ),
                             title: Text(
-                              device.device.platformName ?? 'Unknown',
+                              device.device.platformName.isNotEmpty ? device.device.platformName : 'Unknown',
                               style: theme.textTheme.bodyLarge?.copyWith(
                                 fontWeight: FontWeight.w500,
                               ),

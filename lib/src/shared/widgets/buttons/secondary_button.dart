@@ -169,11 +169,15 @@ class _SecondaryButtonState extends State<SecondaryButton> with SingleTickerProv
             ),
           )
         else
-          Text(
-            widget.label,
-            style: AppTypography.labelFor(brightness).copyWith(
-              color: effectiveForegroundColor,
-              fontSize: 16,
+          Flexible(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.labelFor(brightness).copyWith(
+                color: effectiveForegroundColor,
+                fontSize: 14,
+              ),
             ),
           ),
         if (!widget.isLoading && widget.trailingIcon != null) ...[

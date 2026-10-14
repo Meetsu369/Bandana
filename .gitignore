@@ -2,6 +2,11 @@
 *.class
 *.log
 *.pyc
+**/*.pyc
+**/__pycache__/
+venv/
+**/venv/
+firmware/bandana_esp32/src/bandana_esp32/
 *.swp
 .DS_Store
 .atom/

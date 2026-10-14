@@ -137,7 +137,7 @@ class AppTheme {
           foregroundColor: AppColors.lightWhite,
           disabledBackgroundColor: AppColors.lightSlateSoft,
           disabledForegroundColor: AppColors.lightSlate,
-          minimumSize: Size(double.infinity, AppSpacing.buttonHeight),
+          minimumSize: Size(0, AppSpacing.buttonHeight),
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.button,
@@ -151,7 +151,7 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.lightInk,
           disabledForegroundColor: AppColors.lightSlate,
-          minimumSize: Size(double.infinity, AppSpacing.buttonHeight),
+          minimumSize: Size(0, AppSpacing.buttonHeight),
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
           side: AppShadows.buttonBorder(brightness).top,
           shape: RoundedRectangleBorder(borderRadius: AppRadius.button),
@@ -394,7 +394,7 @@ class AppTheme {
           foregroundColor: AppColors.darkWhite,
           disabledBackgroundColor: AppColors.darkSlateSoft,
           disabledForegroundColor: AppColors.darkSlate,
-          minimumSize: Size(double.infinity, AppSpacing.buttonHeight),
+          minimumSize: Size(0, AppSpacing.buttonHeight),
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
           shape: RoundedRectangleBorder(
             borderRadius: AppRadius.button,
@@ -408,7 +408,7 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.darkInk,
           disabledForegroundColor: AppColors.darkSlate,
-          minimumSize: Size(double.infinity, AppSpacing.buttonHeight),
+          minimumSize: Size(0, AppSpacing.buttonHeight),
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
           side: AppShadows.buttonBorder(brightness).top,
           shape: RoundedRectangleBorder(borderRadius: AppRadius.button),

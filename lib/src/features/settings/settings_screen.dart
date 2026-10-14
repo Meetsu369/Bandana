@@ -1,8 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
@@ -117,9 +115,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasWrist = _wristState == BandConnectionState.connected;
-    final hasAnkle = _ankleState == BandConnectionState.connected;
-    final bothConnected = hasWrist && hasAnkle;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),

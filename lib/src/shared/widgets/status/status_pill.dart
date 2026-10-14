@@ -240,14 +240,14 @@ class StatusPill extends StatelessWidget {
 
     return switch (variant) {
       StatusPillVariant.connected => (
-          isLight ? const Color(0x1A6B8E23) : const Color(0x1A8DB63B), // moss 10%
-          isLight ? const Color(0xFF6B8E23) : const Color(0xFF8DB63B),
+          isLight ? const Color(0xFFD1FAE5) : const Color(0xFF064E3B).withValues(alpha: 0.35),
+          isLight ? const Color(0xFF065F46) : const Color(0xFF6EE7B7),
           Icons.check_circle,
           'Connected',
         ),
       StatusPillVariant.disconnected => (
-          isLight ? const Color(0x1AD94A4A) : const Color(0x1AE57373), // danger 10%
-          isLight ? const Color(0xFFD94A4A) : const Color(0xFFE57373),
+          isLight ? const Color(0xFFFEE2E2) : const Color(0xFF7F1D1D).withValues(alpha: 0.35),
+          isLight ? const Color(0xFF991B1B) : const Color(0xFFFCA5A5),
           Icons.radio_button_unchecked,
           'Disconnected',
         ),

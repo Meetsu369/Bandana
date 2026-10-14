@@ -65,9 +65,8 @@ class BandStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final brightness = theme.brightness;
-    final isLight = brightness == Brightness.light;
 
-    final effectiveTitle = title ?? 'Band Connection';
+    final hasTitle = title != null && title!.isNotEmpty;
     final hasWrist = wristState != null;
     final hasAnkle = ankleState != null;
 
@@ -78,66 +77,159 @@ class BandStatusCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title row
-        Row(
-          children: [
-            Text(
-              effectiveTitle,
-              style: AppTypography.h3For(brightness).copyWith(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
+        // Title row (only if explicit title provided)
+        if (hasTitle || onManageTap != null) ...[
+          Row(
+            children: [
+              if (hasTitle)
+                Text(
+                  title!,
+                  style: AppTypography.h3For(brightness).copyWith(
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              const Spacer(),
+              if (onManageTap != null)
+                TextButton(
+                  onPressed: onManageTap,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    manageLabel,
+                    style: AppTypography.labelSmallFor(brightness).copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        // Side-by-side compact split row when both are present
+        if (hasWrist && hasAnkle)
+          _buildCompactSplitRow(context, brightness)
+        else ...[
+          if (hasWrist)
+            _buildBandRow(
+              context,
+              brightness,
+              role: BandRole.wrist,
+              state: wristState!,
+              deviceName: wristDeviceName,
+              signal: wristSignal,
+              showSignal: showSignal,
+              showDeviceName: showDeviceNames,
             ),
-            const Spacer(),
-            if (onManageTap != null)
-              TextButton(
-                onPressed: onManageTap,
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.xs,
-                  ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  manageLabel,
-                  style: AppTypography.labelSmallFor(brightness).copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        // Band rows
-        if (hasWrist) ...[
-          _buildBandRow(
+          if (hasAnkle)
+            _buildBandRow(
+              context,
+              brightness,
+              role: BandRole.ankle,
+              state: ankleState!,
+              deviceName: ankleDeviceName,
+              signal: ankleSignal,
+              showSignal: showSignal,
+              showDeviceName: showDeviceNames,
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCompactSplitRow(BuildContext context, Brightness brightness) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildSplitChip(
             context,
             brightness,
             role: BandRole.wrist,
-            state: wristState!,
-            deviceName: wristDeviceName,
-            signal: wristSignal,
-            showSignal: showSignal,
-            showDeviceName: showDeviceNames,
+            state: wristState ?? BandConnectionState.disconnected,
+            label: 'Wrist',
           ),
-        ],
-        if (hasWrist && hasAnkle) const SizedBox(height: AppSpacing.md),
-        if (hasAnkle) ...[
-          _buildBandRow(
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: _buildSplitChip(
             context,
             brightness,
             role: BandRole.ankle,
-            state: ankleState!,
-            deviceName: ankleDeviceName,
-            signal: ankleSignal,
-            showSignal: showSignal,
-            showDeviceName: showDeviceNames,
+            state: ankleState ?? BandConnectionState.disconnected,
+            label: 'Ankle',
           ),
-        ],
+        ),
       ],
+    );
+  }
+
+  Widget _buildSplitChip(
+    BuildContext context,
+    Brightness brightness, {
+    required BandRole role,
+    required BandConnectionState state,
+    required String label,
+  }) {
+    final theme = Theme.of(context);
+    final isLight = brightness == Brightness.light;
+    final isConnected = state == BandConnectionState.connected;
+    final roleColor = role.color;
+
+    return InkWell(
+      onTap: onManageTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: isLight ? Colors.white : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038),
+            width: 2.0,
+          ),
+          boxShadow: AppShadows.hardSm(brightness),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: roleColor.withValues(alpha: isLight ? 0.15 : 0.25),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(role.icon, size: 18, color: roleColor),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: AppTypography.bodyMediumFor(brightness).copyWith(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  letterSpacing: -0.2,
+                  color: isLight ? const Color(0xFF18181B) : Colors.white,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            StatusPill(
+              variant: isConnected ? StatusPillVariant.connected : StatusPillVariant.disconnected,
+              text: isConnected ? 'Connected' : 'Offline',
+              showIcon: false,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -148,26 +240,26 @@ class BandStatusCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: isLight ? Colors.white : theme.colorScheme.surface,
         borderRadius: AppRadius.card,
         border: Border.all(
-          color: isLight ? const Color(0xFF111111) : const Color(0xFFF5F3ED),
-          width: 1.5,
+          color: isLight ? const Color(0xFF1A1A1A) : const Color(0xFF2E3039),
+          width: 2.0,
         ),
-        boxShadow: AppShadows.surface,
+        boxShadow: AppShadows.hardSm(brightness),
       ),
       child: Column(
         children: [
           Icon(
             Icons.sensors_off,
             size: AppSpacing.iconSizeXLarge,
-            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
             'No bands connected',
             style: AppTypography.bodyMediumFor(brightness).copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -205,6 +297,8 @@ class BandStatusCard extends StatelessWidget {
     final roleIcon = role.icon;
     final roleDisplayName = role.displayName;
 
+    final isConnected = state == BandConnectionState.connected;
+
     // Determine status pill variant
     final pillVariant = switch (state) {
       BandConnectionState.connected => StatusPillVariant.connected,
@@ -214,109 +308,65 @@ class BandStatusCard extends StatelessWidget {
     };
 
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm + 4),
       decoration: BoxDecoration(
-        color: roleColor.withValues(alpha: isLight ? 0.08 : 0.12),
+        color: isLight ? Colors.white : theme.colorScheme.surface,
         borderRadius: AppRadius.card,
-        border: Border.all(color: roleColor.withValues(alpha: 0.3), width: 1.5),
+        border: Border.all(
+          color: isConnected ? roleColor : (isLight ? const Color(0xFF1A1A1A) : const Color(0xFF2E3039)),
+          width: 2.0,
+        ),
+        boxShadow: AppShadows.hardSm(brightness),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          // Role header
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: roleColor.withValues(alpha: isLight ? 0.15 : 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(roleIcon, size: AppSpacing.iconSizeMedium, color: roleColor),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Text(
-                '$roleDisplayName Band',
-                style: AppTypography.h3For(brightness).copyWith(
-                  color: roleColor,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 18,
-                ),
-              ),
-              const Spacer(),
-              StatusPill(variant: pillVariant),
-            ],
+          // Left Glyph
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: roleColor.withValues(alpha: isLight ? 0.15 : 0.25),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(roleIcon, size: 22, color: roleColor),
           ),
-          // Device name
-          if (showDeviceName && deviceName != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Row(
+          const SizedBox(width: AppSpacing.md),
+          // Device Name & Status (no duplicated hardware strings)
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.bluetooth,
-                  size: AppSpacing.iconSizeSmall,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                Expanded(
-                  child: Text(
-                    deviceName,
-                    style: AppTypography.bodySmallFor(brightness),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                Text(
+                  '$roleDisplayName Band',
+                  style: AppTypography.h3For(brightness).copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    letterSpacing: -0.3,
                   ),
                 ),
-              ],
-            ),
-          ] else if (showDeviceName && deviceName == null && state == BandConnectionState.connected) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Row(
-              children: [
-                Icon(
-                  Icons.bluetooth,
-                  size: AppSpacing.iconSizeSmall,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: AppSpacing.xs),
+                const SizedBox(height: 2),
                 Text(
-                  'Connected (name unavailable)',
+                  isConnected
+                      ? (signal ?? (deviceName != null ? 'Connected · $deviceName' : 'Signal: Good'))
+                      : 'Offline',
                   style: AppTypography.bodySmallFor(brightness).copyWith(
-                    fontStyle: FontStyle.italic,
+                    color: isConnected
+                        ? (isLight ? const Color(0xFF2E7D32) : const Color(0xFF81C784))
+                        : (isLight ? const Color(0xFF757575) : Colors.white60),
+                    fontWeight: isConnected ? FontWeight.w600 : FontWeight.w400,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
-          ],
-          // Signal quality
-          if (showSignal) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Row(
-              children: [
-                Icon(
-                  Icons.signal_cellular_alt,
-                  size: AppSpacing.iconSizeSmall,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                Text(
-                  signal ?? _defaultSignalLabel(state, brightness),
-                  style: AppTypography.bodySmallFor(brightness),
-                ),
-              ],
-            ),
-          ],
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          // Center/Right: Single Status Badge
+          StatusPill(variant: pillVariant),
         ],
       ),
     );
-  }
-
-  String _defaultSignalLabel(BandConnectionState state, Brightness brightness) {
-    return switch (state) {
-      BandConnectionState.connected => 'Signal: Good',
-      BandConnectionState.connecting => 'Connecting...',
-      BandConnectionState.scanning => 'Scanning...',
-      BandConnectionState.disconnected => 'Disconnected',
-    };
   }
 }
