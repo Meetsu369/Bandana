@@ -5,7 +5,7 @@
 [![ESP32-C3](https://img.shields.io/badge/Microcontroller-ESP32--C3-E7352C?logo=espressif&logoColor=white)](https://www.espressif.com/)
 [![BLE 5.0](https://img.shields.io/badge/Wireless-BLE%205.0%20(512%20MTU)-0082FC?logo=bluetooth&logoColor=white)](https://www.bluetooth.com/)
 [![Architecture](https://img.shields.io/badge/Architecture-Riverpod%20%2B%20Drift%20%2B%20GetIt-8A2BE2)](#architecture--tech-stack)
-[![Tests](https://img.shields.io/badge/Tests-152%20Passing-brightgreen?logo=checkmarx&logoColor=white)](#testing--verification)
+[![Tests](https://img.shields.io/badge/Tests-172%20Passing-brightgreen?logo=checkmarx&logoColor=white)](#testing--verification)
 [![Design](https://img.shields.io/badge/UI%2FUX-Neo--Brutalist%20Bento-FF3384)](#uiux-design-system)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -87,13 +87,15 @@ Designed with a high-contrast **Neo-Brutalist Bento Grid** interface in both Lig
 - **Real-Time IMU Charts**: Visualizes 6-axis acceleration and angular velocity streams using dynamic `fl_chart` graphs.
 - **Dual Storage**: Logs raw IMU samples into high-speed SQLite (`drift`), with secondary on-hardware MicroSD card backup (`/activity.csv`).
 
-### 3. Edge-AI Machine Learning & Evaluation
+### 3. Edge-AI Machine Learning & Model Training Hub
 - **On-Device Training**: Train directly on your phone with zero internet connection required.
 - **Algorithms**:
   - **K-Nearest Neighbors (KNN)** with customizable *k* neighbors.
   - **Multi-Class Logistic Regression** with softmax probabilities.
-- **Configurable Data Sources**: Train models on Wrist only (15 features), Ankle only (15 features), or Combined Dual-Band (30 features).
+- **Configurable Data Sources**: Train models on Wrist only (15 features), Ankle only (15 features), or Combined Dual-Band (30 features) using Bento segmented button groups.
+- **De-duplicated Session Selector**: Clean header with real-time session count badges, `All`, and `Clear` bulk selection actions.
 - **Session-Level Validation (Zero Data Leakage)**: Splits whole sessions into training and hold-out sets rather than mixing adjacent time windows.
+- **Locked Action Bar**: Dedicated bottom action bar with prerequisite validation tooltips preventing training on 0 selected sessions.
 - **Comprehensive Evaluation Metrics**: Evaluates models on-device and computes:
   - Overall Accuracy (%)
   - Macro F1 Score
@@ -107,35 +109,47 @@ Designed with a high-contrast **Neo-Brutalist Bento Grid** interface in both Lig
   - **USB ADB Reverse Port Forwarding** (`adb reverse tcp:8000 tcp:8000`) for zero-configuration, lightning-fast offline training.
   - **Local Area Network (Wi-Fi)**: Connect using your computer's local IP (`http://192.168.x.x:8000`).
   - **Android Emulator**: Built-in support via `http://10.0.2.2:8000`.
-- **One-Tap Model Sync**: Uploads recorded sessions as CSV, trains advanced models, and downloads a validated JSON model artifact directly into the mobile app's runtime.
+- **Zero-Overflow Laptop Service Dialog**: Resilient layout with icon tile, status diagnostics, and JSON model artifact paste/import.
 
 ### 5. Session History & Data Portability
-- **Interactive Session Explorer**: Filter recorded sessions by activity label, view sample counts, durations, and sensor timestamps.
+- **Neo-Brutalist Session Explorer**: Filter recorded sessions by activity label with high-contrast color pills, view sample counts, durations, and sensor timestamps.
 - **Batch Management**: Multi-select sessions for batch deletion or bulk export.
 - **Comprehensive Data Export**: Export sessions to standardized CSV or JSON formats, zipped and ready to share via Google Drive, WhatsApp, Email, or Slack using Android/iOS native share sheets.
 
-### 6. Profile & Health Telemetry
-- **Participant Metadata**: Track Participant ID, Age, Gender, Height, Weight, and Stride Length.
-- **Metabolic Calorie Computation**: Computes active energy expenditure using scientific **Metabolic Equivalent of Task (MET)** formulas calibrated to your weight and activity duration.
+### 6. Consumer Google Drive Cloud Integration
+- **One-Tap Consumer Cloud Sign-In**: Simple `[ G Continue with Google Drive ]` button eliminating complex developer setup for end users.
+- **Live Backup Status Card**: Bento summary showing destination folder, last backup timestamp, `Disconnect`, and one-click `[ Backup Now ]`.
+- **Expandable Developer Accordion**: Advanced technical options (OAuth Client ID, SHA-1 fingerprints, package name verification) tucked neatly into a `Developer & Custom API Settings ▾` accordion.
+
+### 7. My Bands Management & Layout Polish
+- **Dynamic Scroll Inset**: Dynamic bottom scroll padding (`96px`) ensuring sticky `[ 📡 Scan for Nearby Bands ]` FAB never obscures Connection Guide steps.
+- **High-Contrast Status Badges**: Clear green pills for `● Connected` and red-outlined pills for `○ Disconnected`.
+- **Dedicated Kebab Menu**: 44x44pt tap-target `⋮` options menu for `Rename Band`, `Calibrate IMU`, and `Unpair Band`.
+
+### 8. Profile & Fitness Architecture
+- **Segmented Sub-Tabs**: Organized into `Fitness & Body` (Demographics, Goals, Calorie/MET calculation) and `App Settings` (Theme toggle, Cloud sync, System Architecture).
+- **Metric Summary Bento Strip**: 3-tile strip highlighting `Total Sessions` (`#BAE6FD`), `Recorded Time` (`#E9D5FF`), and `Energy Exp.` (`#D6F865`).
+- **Clean Routing**: Removed redundant navigation links duplicating the primary bottom navigation bar.
 
 ---
 
 ## 🎨 UI/UX Design System
 
-The app adheres strictly to the **Neo-Brutalist Bento Grid** visual language:
+The app adheres strictly to the **Neo-Brutalist Bento Grid** visual language across Light and Dark themes:
 
 | Design Token | Light Mode Value | Dark Mode Value | Usage |
 |:---|:---|:---|:---|
-| **Canvas Background** | `#FAF8F5` (Warm Cream) | `#121316` (Deep Slate Charcoal) | Root Scaffold background |
-| **Card Surface** | `#FFFFFF` (Pure White) | `#1E2024` (Elevated Surface) | Bento cards, dialogs, sheets |
-| **Borders & Outlines** | 2.0px solid `#18181B` | 2.0px solid `#2E3038` | Enclosed containers, buttons, inputs |
-| **Hard Drop Shadows** | `3px 3px 0px #18181B` | None (flat high-contrast border) | Interactive cards, CTAs, badges |
-| **Primary Accent** | `#FF3384` (Vibrant Pink) | `#FF3384` (Vibrant Pink) | Primary action buttons, active tab |
-| **Hero Preview Surface**| `#E9D5FF` (Soft Lavender) | `#2E1B4E` (Deep Violet) | Live preview card, AI status |
-| **Tracker / Steps Accent**| `#BAE6FD` (Sky Blue) | `#1E293B` (Navy Slate) | Step tracker, cadence indicators |
-| **Activity Accent** | `#E2F952` (Lime Yellow) | `#243312` (Deep Olive) | Movement cards, active timers |
-| **Hardware / Connected**| `#D1FAE5` / `#065F46` | `#132E2B` / `#34D399` | Connected status pill, online dot |
-| **Offline / Disconnected**| `#FEE2E2` / `#991B1B` | `#2D1515` / `#F87171` | Disconnected status pill, offline dot |
+| **Canvas Background** | `#FAF8F5` (Light Cream) | `#121316` (Dark Slate) | Root Scaffold background |
+| **Surface/Card Fill** | `#FFFFFF` (Pure White) | `#1C1D22` (Elevated Charcoal) | Bento cards, dialogs, sheets |
+| **Surface Border** | `2px solid #18181B` | `2px solid #383A42` | Enclosed containers, buttons, inputs |
+| **Hard Shadow** | `3px 3px 0px #18181B` | `3px 3px 0px rgba(0,0,0,0.65)` | Interactive cards, CTAs, badges |
+| **Brand Pink Accent** | `#FF3384` | `#FF3384` | Primary action buttons, active tab pills |
+| **Success/Connected Lime** | `#D6F865` | `#D6F865` | Connected status pill, algorithm active pill |
+| **Info/Data Sky Blue** | `#BAE6FD` | `#BAE6FD` | Telemetry cards, step metrics |
+| **Warning/Notice Yellow** | `#FEF08A` | `#FEF08A` | Notice banners, calibration alerts |
+| **Danger/Error** | `#F87171` | `#F87171` | Disconnected status pill, delete actions |
+| **Text Primary** | `#18181B` (95% Black) | `#F4F4F5` (Zinc White) | Headers, metric values, primary titles |
+| **Text Secondary** | `#52525B` (Zinc Gray) | `#A1A1AA` (Muted Zinc) | Subtitles, timestamps, captions |
 | **Border Radius** | `20px` (Cards), `14px` (Buttons), `999px` (Pills) | Uniform structural geometry |
 
 ---
@@ -444,9 +458,13 @@ c:\Project\Bandana\Bandana\
 │       ├── services/                    # BleService, DatabaseService, MlService, ExportService
 │       ├── shared/                      # Reusable Neo-Brutalist buttons, cards, status pills
 │       └── utils/                       # Cadence gating, boundary detectors, filename utils
-├── test/                                # Automated unit, widget, and integration tests
+├── test/                                # Automated unit, widget, and integration tests (172 tests)
+│   ├── history_screen_test.dart         # History screen filtering, delete & metrics tests
 │   ├── live_screen_test.dart            # Live recognition screen state tests
-│   ├── theme_test.dart                  # Light/Dark mode switching & persistence tests
+│   ├── profile_screen_test.dart         # Profile & Fitness tabs and Google Drive sync tests
+│   ├── record_screen_test.dart          # Recording session flow & pause/resume tests
+│   ├── session_detail_screen_test.dart  # Session inspector & telemetry tests
+│   ├── theme_test.dart                  # Light/Dark mode switching & token tests
 │   ├── training_evaluation_test.dart    # ML algorithms, F1 score & confusion matrix tests
 │   └── widget_test.dart                 # App navigation & shell smoke tests
 ├── pubspec.yaml                         # Flutter dependencies & assets

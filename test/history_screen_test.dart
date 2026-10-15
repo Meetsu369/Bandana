@@ -70,10 +70,22 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    // Verify chronological date group header
+    expect(find.text('TODAY'), findsOneWidget);
+
+    // Verify activity cards rendered with labels and metrics
     expect(find.text('Walking'), findsOneWidget);
     expect(find.text('Running'), findsOneWidget);
     expect(find.text('160 samples'), findsOneWidget);
     expect(find.text('320 samples'), findsOneWidget);
+
+    // Verify right kebab and chevron affordance
+    expect(find.byIcon(Icons.more_vert), findsNWidgets(2));
+    expect(find.byIcon(Icons.chevron_right), findsNWidgets(2));
+
+    // Verify 48x48 activity icon glyphs
+    expect(find.byIcon(Icons.directions_walk), findsOneWidget);
+    expect(find.byIcon(Icons.directions_run), findsOneWidget);
   });
 
   testWidgets('HistoryScreen supports multi-select mode', (tester) async {
@@ -101,5 +113,29 @@ void main() {
 
     expect(find.text('1 Selected'), findsOneWidget);
     expect(find.text('Share ZIP'), findsOneWidget);
+  });
+
+  testWidgets('HistoryScreen filter and empty search filter state', (tester) async {
+    final s1 = await db.createSession('Walking', participantId: 'test_1');
+    await db.endSession(s1, 150);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HistoryScreen(),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Tap Filter pill
+    await tester.tap(find.text('Filter'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Filter & Sort'), findsOneWidget);
+    expect(find.text('All Activities'), findsOneWidget);
+
+    // Close modal
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
   });
 }

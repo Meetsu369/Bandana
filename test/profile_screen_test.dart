@@ -90,19 +90,22 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify participant setup section
+    expect(find.text('Fitness & Body'), findsOneWidget);
+    expect(find.text('App Settings'), findsOneWidget);
     expect(find.text('Daily Movement Goal'), findsOneWidget);
-    expect(find.text('Participant Setup'), findsOneWidget);
+    expect(find.text('Participant Demographics'), findsOneWidget);
     expect(find.text('test_user_42'), findsOneWidget);
 
     // Verify fitness metrics & MET estimation
-    expect(find.text('Movement & Fitness Summary'), findsOneWidget);
-    expect(find.text('Energy Expenditure Estimate'), findsOneWidget);
+    expect(find.text('Energy Expenditure Breakdown'), findsOneWidget);
     expect(find.textContaining('kcal'), findsWidgets);
     expect(find.textContaining('Scientific Disclaimer'), findsOneWidget);
 
-    // Verify Google Drive section
-    expect(find.text('Google Drive & Backup'), findsOneWidget);
-    expect(find.text('Google Drive Setup & Instructions'), findsOneWidget);
+    // Switch to Tab 2: App Settings and verify Google Drive
+    await tester.tap(find.text('App Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Google Drive Sync'), findsOneWidget);
+    expect(find.text('Continue with Google Drive'), findsOneWidget);
   });
 
   testWidgets('ProfileScreen allows updating participant details and persists to SharedPreferences', (tester) async {
@@ -137,7 +140,7 @@ void main() {
     expect(prefs.getString('bandana_participant_id'), equals('dr_watson_01'));
   });
 
-  testWidgets('ProfileScreen opens Google Drive modal with instructions and security rule', (tester) async {
+  testWidgets('ProfileScreen expands Developer & Custom API Settings accordion with security rule', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() {
@@ -153,12 +156,15 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    final driveButton = find.text('Google Drive Setup & Instructions');
-    expect(driveButton, findsOneWidget);
-    await tester.tap(driveButton);
+    // Switch to Tab 2: App Settings
+    await tester.tap(find.text('App Settings'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Google Drive Integration'), findsOneWidget);
+    final devAccordion = find.text('Developer & Custom API Settings');
+    expect(devAccordion, findsOneWidget);
+    await tester.tap(devAccordion);
+    await tester.pumpAndSettle();
+
     expect(find.text('Security & Credential Rule'), findsOneWidget);
     expect(find.textContaining('Client secrets must NEVER be embedded'), findsOneWidget);
   });

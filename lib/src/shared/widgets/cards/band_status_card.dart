@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/ble_constants.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radius.dart';
 import '../../../core/theme/app_shadows.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -191,7 +192,7 @@ class BandStatusCard extends StatelessWidget {
           color: isLight ? Colors.white : theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038),
+            color: AppColors.borderColor(brightness),
             width: 2.0,
           ),
           boxShadow: AppShadows.hardSm(brightness),
@@ -243,7 +244,7 @@ class BandStatusCard extends StatelessWidget {
         color: isLight ? Colors.white : theme.colorScheme.surface,
         borderRadius: AppRadius.card,
         border: Border.all(
-          color: isLight ? const Color(0xFF1A1A1A) : const Color(0xFF2E3039),
+          color: AppColors.borderColor(brightness),
           width: 2.0,
         ),
         boxShadow: AppShadows.hardSm(brightness),
@@ -313,7 +314,7 @@ class BandStatusCard extends StatelessWidget {
         color: isLight ? Colors.white : theme.colorScheme.surface,
         borderRadius: AppRadius.card,
         border: Border.all(
-          color: isConnected ? roleColor : (isLight ? const Color(0xFF1A1A1A) : const Color(0xFF2E3039)),
+          color: isConnected ? roleColor : AppColors.borderColor(brightness),
           width: 2.0,
         ),
         boxShadow: AppShadows.hardSm(brightness),

@@ -277,7 +277,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 color: AppColors.primaryAccent(brightness),
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: brightness == Brightness.light ? const Color(0xFF18181B) : const Color(0xFF2E3038),
+                                  color: AppColors.borderColor(brightness),
                                   width: 2.0,
                                 ),
                                 boxShadow: AppShadows.hardSm(brightness),
@@ -417,7 +417,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Cell 1: Today's Focus (Full Width, 2-Columns) ──
   Widget _buildBentoCell1(BuildContext context, Brightness brightness, bool anyConnected) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
     final count = _todaySessionCount;
     // Pluralization rule: ${count} session when count === 1, and ${count} sessions otherwise.
     final sessionText = '$count ${count == 1 ? 'Session' : 'Sessions'}';
@@ -447,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: isLight ? Colors.white : const Color(0xFF2E3038),
+                      color: isLight ? Colors.white : AppColors.darkSurface,
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: isLight ? const Color(0xFF18181B) : Colors.white24,
@@ -554,7 +554,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Bento Row 2 & 3: Windows Processed & Model Readiness (50% / 50% split) ──
   Widget _buildBentoRow2and3(BuildContext context, Brightness brightness, ThemeData theme) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     // Cell 2: Windows Processed
     final formattedWindows = _formatNumber(_totalWindows);
@@ -710,7 +710,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Cell 4: Latest Activity (Full Width, 2-Columns) ──
   Widget _buildBentoCell4(BuildContext context, Brightness brightness, ThemeData theme) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     final latest = _recentSessions.isNotEmpty ? _recentSessions.first : null;
     final duration = latest != null
@@ -844,7 +844,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Session session,
   ) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     final duration = session.endTime != null
         ? session.endTime!.difference(session.startTime)
@@ -929,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Bottom Onboarding Banner ──
   Widget _buildOnboardingBanner(BuildContext context, Brightness brightness, ThemeData theme) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       width: double.infinity,

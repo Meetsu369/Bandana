@@ -477,7 +477,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   /// Right Accessory: Split device connectivity badge enclosed in a neo-brutalist pill
   Widget _buildSplitDevicePill(Brightness brightness, bool hasWrist, bool hasAnkle) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -485,7 +485,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         color: isLight ? Colors.white : AppColors.surface(brightness),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hardSm(brightness) : null,
+        boxShadow: AppShadows.hardSm(brightness),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -520,7 +520,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     required Brightness brightness,
   }) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
     final dotColor = isConnected
         ? const Color(0xFF10B981) // Crisp vibrant emerald green
         : const Color(0xFFEF4444); // Crisp vibrant red
@@ -596,7 +596,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   /// Hero Bento Preview Card (Replacing Dead Void)
   Widget _buildHeroPreviewCard(Brightness brightness) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       width: double.infinity,
@@ -605,7 +605,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         color: isLight ? const Color(0xFFE9D5FF) : const Color(0xFF2E1B4E),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hard(brightness) : null,
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -785,16 +785,16 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     required bool bothConnected,
   }) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isLight ? Colors.white : const Color(0xFF1E1E22),
+        color: isLight ? Colors.white : AppColors.darkSurface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hard(brightness) : null,
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -807,7 +807,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
                   color: AppColors.limeYellow(brightness),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038),
+                    color: AppColors.borderColor(brightness),
                     width: 1.5,
                   ),
                 ),
@@ -971,7 +971,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         _buildNeoButton(
           label: isModelReadyForTraining ? 'Record Another Session' : 'Manage & Train Models',
           leadingIcon: isModelReadyForTraining ? Icons.fiber_manual_record : Icons.settings,
-          backgroundColor: isLight ? Colors.white : const Color(0xFF1E2024),
+          backgroundColor: isLight ? Colors.white : AppColors.darkSurface,
           textColor: isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
           brightness: brightness,
           height: 48,
@@ -997,7 +997,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     double height = 50,
   }) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       width: double.infinity,
@@ -1006,7 +1006,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         color: backgroundColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hard(brightness) : null,
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Material(
         color: Colors.transparent,
@@ -1084,7 +1084,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
               label: _isRunning ? 'Stop Recognition' : 'Start Recognition',
               leadingIcon: _isRunning ? Icons.stop : Icons.play_arrow,
               backgroundColor: _isRunning
-                  ? (isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038))
+                  ? (isLight ? const Color(0xFF18181B) : AppColors.darkBorder)
                   : const Color(0xFFFF3384),
               textColor: Colors.white,
               brightness: brightness,
@@ -1107,7 +1107,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     required Brightness brightness,
   }) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -1118,7 +1118,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         color: AppColors.surface(brightness),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hardSm(brightness) : null,
+        boxShadow: AppShadows.hardSm(brightness),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1201,7 +1201,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
   Widget _buildDualBandNotice(Brightness brightness) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
@@ -1230,7 +1230,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
   Widget _buildHeroPredictionCard(Brightness brightness) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
     final item = _currentPredictionItem;
     final pred = item?.prediction;
     final colors = pred != null
@@ -1243,7 +1243,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         color: AppColors.surface(brightness),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: isLight ? AppShadows.hard(brightness) : null,
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1414,7 +1414,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
   Widget _buildTimelineSection(Brightness brightness) {
     final isLight = brightness == Brightness.light;
-    final strokeColor = isLight ? const Color(0xFF18181B) : const Color(0xFF2E3038);
+    final strokeColor = AppColors.borderColor(brightness);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

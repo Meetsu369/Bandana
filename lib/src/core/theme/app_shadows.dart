@@ -58,10 +58,29 @@ class AppShadows {
     ),
   ];
 
-  /// Hard drop shadow — crisp 3px 3px neo-brutalist offset (0px blur, #18181B).
+  /// Static 3px neo-brutalist hard drop shadow.
+  static const BoxShadow hardShadow = BoxShadow(
+    color: Color(0xFF18181B),
+    offset: Offset(3, 3),
+    blurRadius: 0,
+    spreadRadius: 0,
+  );
+
+  /// Static 2px neo-brutalist hard drop shadow.
+  static const BoxShadow hardShadowSm = BoxShadow(
+    color: Color(0xFF18181B),
+    offset: Offset(2, 2),
+    blurRadius: 0,
+    spreadRadius: 0,
+  );
+
+  /// Hard drop shadow — crisp 3px 3px neo-brutalist offset (0px blur).
+  /// Light mode: #18181B (Pitch Dark). Dark mode: rgba(0, 0, 0, 0.65) = Color(0xA6000000).
   static List<BoxShadow> hard(Brightness brightness) => <BoxShadow>[
         BoxShadow(
-          color: brightness == Brightness.light ? const Color(0xFF18181B) : const Color(0xFF000000),
+          color: brightness == Brightness.light
+              ? const Color(0xFF18181B)
+              : const Color(0xA6000000),
           offset: const Offset(3, 3),
           blurRadius: 0,
           spreadRadius: 0,
@@ -71,12 +90,22 @@ class AppShadows {
   /// Compact hard drop shadow — crisp 2px 2px neo-brutalist offset.
   static List<BoxShadow> hardSm(Brightness brightness) => <BoxShadow>[
         BoxShadow(
-          color: brightness == Brightness.light ? const Color(0xFF18181B) : const Color(0xFF000000),
+          color: brightness == Brightness.light
+              ? const Color(0xFF18181B)
+              : const Color(0xA6000000),
           offset: const Offset(2, 2),
           blurRadius: 0,
           spreadRadius: 0,
         ),
       ];
+
+  /// Helper for 3px hard drop shadow with isDark boolean.
+  static List<BoxShadow> bento(bool isDark) =>
+      hard(isDark ? Brightness.dark : Brightness.light);
+
+  /// Helper for 2px compact hard drop shadow with isDark boolean.
+  static List<BoxShadow> bentoSm(bool isDark) =>
+      hardSm(isDark ? Brightness.dark : Brightness.light);
 
   /// Focus ring shadow — for accessibility focus states.
   ///
@@ -92,11 +121,11 @@ class AppShadows {
 
   /// Card border — used with surface shadow for neo-brutalist card look.
   ///
-  /// Solid 2px border (#18181B in light, #2E3038 in dark).
+  /// Solid 2px border (#18181B in light, #383A42 in dark).
   static Border cardBorder(Brightness brightness, {double width = 2.0}) => Border.all(
         color: brightness == Brightness.light
             ? const Color(0xFF18181B)
-            : const Color(0xFF2E3038),
+            : const Color(0xFF383A42),
         width: width,
       );
 
@@ -105,7 +134,7 @@ class AppShadows {
         color: customColor ??
             (brightness == Brightness.light
                 ? const Color(0xFF18181B)
-                : const Color(0xFF2E3038)),
+                : const Color(0xFF383A42)),
         width: width,
       );
 

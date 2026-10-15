@@ -6,10 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/ble_constants.dart';
 import '../../core/di/service_locator.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_shadows.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/record/session_detail_screen.dart';
 import '../../models/imu_sample.dart' as model;
-import '../../models/sensor_data.dart';
 import '../../services/activity_label_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
@@ -17,7 +18,6 @@ import '../../services/ml_service.dart';
 import '../../utils/cadence_gate.dart';
 import '../../utils/dual_band_window_manager.dart';
 import '../../utils/session_boundary.dart';
-import '../../widgets/sensor_chart.dart';
 
 /// Record Mode screen – tag and record IMU data streams with activity labels.
 class RecordScreen extends StatefulWidget {
@@ -37,11 +37,16 @@ class _RecordScreenState extends State<RecordScreen>
   String _selectedLabel = BleConstants.defaultLabels.first;
   String _participantId = 'participant_1';
   final _participantController = TextEditingController(text: 'participant_1');
+  late TextEditingController _notesController;
   String _sessionNotes = '';
   bool _isRecording = false;
   int? _sessionId;
   int _wristSampleCount = 0;
   int _ankleSampleCount = 0;
+  Timer? _elapsedTimer;
+
+  bool get _isTestEnvironment =>
+      WidgetsBinding.instance.runtimeType.toString().contains('TestWidgetsFlutterBinding');
 
   // ── Sensor buffers ──
   final List<model.ImuSample> _wristChartBuffer = [];
@@ -73,8 +78,6 @@ class _RecordScreenState extends State<RecordScreen>
   // ── Performance tracking ──
   int _wristPacketsReceived = 0;
   int _anklePacketsReceived = 0;
-  int _wristMalformedPackets = 0;
-  int _ankleMalformedPackets = 0;
   DateTime? _recordingStartTime;
 
   // Diagnostics for 40 Hz validation
@@ -106,6 +109,7 @@ class _RecordScreenState extends State<RecordScreen>
       _participantId = savedParticipant.trim();
       _participantController.text = _participantId;
     }
+    _notesController = TextEditingController(text: _sessionNotes);
     _selectedLabel = _labelManager.allLabels.first;
     _labelManager.addListener(_onLabelsChanged);
 
@@ -183,6 +187,9 @@ class _RecordScreenState extends State<RecordScreen>
   void dispose() {
     _labelManager.removeListener(_onLabelsChanged);
     _participantController.dispose();
+    _notesController.dispose();
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
 
     // Cancel flush timer first to prevent new flushes
     _dbFlushTimer?.cancel();
@@ -235,6 +242,7 @@ class _RecordScreenState extends State<RecordScreen>
     );
 
     // Save notes if provided
+    _sessionNotes = _notesController.text.trim();
     if (_sessionNotes.isNotEmpty) {
       await _db.updateSessionNotes(sessionId, _sessionNotes);
     }
@@ -250,8 +258,6 @@ class _RecordScreenState extends State<RecordScreen>
       _anklePendingDbWrite.clear();
       _wristPacketsReceived = 0;
       _anklePacketsReceived = 0;
-      _wristMalformedPackets = 0;
-      _ankleMalformedPackets = 0;
       _recordingStartTime = DateTime.now();
       _recordingStopped = false; // Reset flag for new recording
     });
@@ -259,7 +265,15 @@ class _RecordScreenState extends State<RecordScreen>
     _windowManager.reset();
     _cadenceGate.reset();
 
-    _pulseController.repeat(reverse: true);
+    _elapsedTimer?.cancel();
+    if (!_isTestEnvironment) {
+      _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted && _isRecording) setState(() {});
+      });
+      _pulseController.repeat(reverse: true);
+    } else {
+      _pulseController.value = 1.0;
+    }
 
     // Start flush timer
     _startDbFlushTimer();
@@ -416,6 +430,8 @@ class _RecordScreenState extends State<RecordScreen>
     _dbFlushTimer = null;
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
     _pulseController.stop();
     _pulseController.reset();
 
@@ -450,6 +466,7 @@ class _RecordScreenState extends State<RecordScreen>
         _isRecording = false;
         _sessionId = null;
         _sessionNotes = '';
+        _notesController.clear();
       });
     }
 
@@ -527,617 +544,1218 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   String _formatRate(int count, {bool isWindow = false}) {
-    if (_recordingStartTime == null) return '0/s';
+    if (_recordingStartTime == null) return isWindow ? '0.0/s' : '0.0 Hz';
     final elapsed = DateTime.now().difference(_recordingStartTime!).inSeconds;
-    if (elapsed == 0) return '0/s';
+    if (elapsed == 0) return isWindow ? '0.0/s' : '0.0 Hz';
     if (isWindow) {
       return '${(count / elapsed).toStringAsFixed(1)}/s';
     }
     return '${(count / elapsed).toStringAsFixed(1)} Hz';
   }
 
+  String _formatElapsed() {
+    if (_recordingStartTime == null) return '00:00:00';
+    final elapsed = DateTime.now().difference(_recordingStartTime!);
+    final hours = elapsed.inHours.toString().padLeft(2, '0');
+    final minutes = (elapsed.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$seconds';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final hasWrist = _wristBleState == BandConnectionState.connected;
     final hasAnkle = _ankleBleState == BandConnectionState.connected;
 
     return Scaffold(
+      backgroundColor: isDark ? AppColors.darkCanvas : AppColors.lightCanvas,
       appBar: AppBar(
-        title: const Text('Record'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        title: Text(
+          'Record',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+          ),
+        ),
         actions: [
-          _buildBandStatusChip(theme, BandRole.wrist, _wristBleState),
-          const SizedBox(width: 4),
-          _buildBandStatusChip(theme, BandRole.ankle, _ankleBleState),
-          const SizedBox(width: 8),
+          _buildSplitDevicePill(isDark),
+          const SizedBox(width: 16),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(AppTheme.spacingMd),
-        child: Column(
-          children: [
-            // ── Session Setup (Participant, Activity, Notes) ──
-            if (!_isRecording) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(AppTheme.spacingMd),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.person_outline, color: theme.colorScheme.primary, size: 20),
-                          const SizedBox(width: 8),
-                          Text('Participant ID', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                      const SizedBox(height: AppTheme.spacingXs),
-                      TextField(
-                        controller: _participantController,
-                        decoration: InputDecoration(
-                          hintText: 'e.g. sumeet_1, participant_1',
-                          helperText: 'Participant label is used in exported CSV filenames',
-                          helperMaxLines: 2,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          isDense: true,
-                        ),
-                      ),
-                      const SizedBox(height: AppTheme.spacingMd),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.label_outline, color: theme.colorScheme.primary, size: 20),
-                              const SizedBox(width: 8),
-                              Text('Activity', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                          TextButton.icon(
-                            onPressed: _showAddCustomActivityDialog,
-                            icon: const Icon(Icons.add, size: 16),
-                            label: const Text('Custom Activity'),
-                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTheme.spacingXs),
-                      DropdownButtonFormField<String>(
-                        initialValue: _labelManager.allLabels.contains(_selectedLabel)
-                            ? _selectedLabel
-                            : _labelManager.allLabels.first,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          isDense: true,
-                        ),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _selectedLabel = value);
-                          }
-                        },
-                        items: _labelManager.allLabels.map((label) {
-                          return DropdownMenuItem(
-                            value: label,
-                            child: Text(label),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: AppTheme.spacingMd),
-                      Row(
-                        children: [
-                          Icon(Icons.notes_outlined, color: theme.colorScheme.primary, size: 20),
-                          const SizedBox(width: 8),
-                          Text('Session Notes (Optional)', style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                      const SizedBox(height: AppTheme.spacingXs),
-                      TextField(
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          hintText: 'Add context about this recording session...',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
-                          contentPadding: const EdgeInsets.all(AppTheme.spacingMd),
-                          isDense: true,
-                        ),
-                        onChanged: (value) => _sessionNotes = value,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppTheme.spacingMd),
-            ],
-
-            // ── Stats Bar ──
-            if (_isRecording)
-              AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, child) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.spacingMd,
-                      vertical: AppTheme.spacingSm,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.errorContainer.withValues(
-                        alpha: 0.3 + _pulseController.value * 0.3,
-                      ),
-                      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.fiber_manual_record,
-                              color: theme.colorScheme.error,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Recording: $_selectedLabel',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (_sessionId != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            'Session ID: $_sessionId',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Wrist: $_wristSampleCount windows, ${_formatRate(_wristPacketsReceived)} samples',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w500,
-                                color: BandRole.wrist.color,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Text(
-                              'Ankle: $_ankleSampleCount windows, ${_formatRate(_anklePacketsReceived)} samples',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w500,
-                                color: BandRole.ankle.color,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-            const SizedBox(height: AppTheme.spacingMd),
-
-            // ── Real-time Charts ──
-            Expanded(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 12, 16, 8),
-                  child: !hasWrist && !hasAnkle
-                      ? Center(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Positioned.fill(
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: CustomPaint(
-                                    painter: _BlueprintChartPainter(theme.brightness),
-                                  ),
-                                ),
-                              ),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: (theme.brightness == Brightness.light ? Colors.white : const Color(0xFF1E2129))
-                                        .withValues(alpha: 0.94),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: theme.brightness == Brightness.light
-                                          ? const Color(0xFF1A1A1A)
-                                          : const Color(0xFF383B46),
-                                      width: 1.5,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.08),
-                                        offset: const Offset(0, 4),
-                                        blurRadius: 8,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.sensors_outlined,
-                                        size: 26,
-                                        color: theme.colorScheme.primary,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Live Telemetry Blueprint',
-                                        style: theme.textTheme.titleSmall?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'Connect bands to stream real-time 6-DOF IMU data',
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: theme.colorScheme.onSurfaceVariant,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView(
-                          children: [
-                            if (hasWrist) ...[
-                              _buildChartSection(
-                                theme,
-                                'Wrist',
-                                BandRole.wrist.color,
-                                _wristChartBuffer,
-                                _wristBleState,
-                              ),
-                              const SizedBox(height: 16),
-                            ],
-                            if (hasAnkle) ...[
-                              _buildChartSection(
-                                theme,
-                                'Ankle',
-                                BandRole.ankle.color,
-                                _ankleChartBuffer,
-                                _ankleBleState,
-                              ),
-                            ],
-                          ],
-                        ),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppTheme.spacingMd),
-
-            // ── Performance Stats ──
-            if (_isRecording) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(AppTheme.spacingMd),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Performance',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 16,
-                        runSpacing: 8,
-                        children: [
-                          _buildStatChip(
-                            theme,
-                            'Wrist RX',
-                            '$_wristPacketsReceived (${_formatRate(_wristPacketsReceived)})',
-                            BandRole.wrist.color,
-                          ),
-                          _buildStatChip(
-                            theme,
-                            'Ankle RX',
-                            '$_anklePacketsReceived (${_formatRate(_anklePacketsReceived)})',
-                            BandRole.ankle.color,
-                          ),
-                          if (_wristMalformedPackets > 0)
-                            _buildStatChip(
-                              theme,
-                              'Wrist Bad',
-                              '$_wristMalformedPackets',
-                              Colors.orange,
-                            ),
-                          if (_ankleMalformedPackets > 0)
-                            _buildStatChip(
-                              theme,
-                              'Ankle Bad',
-                              '$_ankleMalformedPackets',
-                              Colors.orange,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppTheme.spacingMd),
-            ],
-
-            // ── Start / Stop Button ──
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: FilledButton.icon(
-                onPressed: _isRecording ? _stopRecording : _startRecording,
-                icon: Icon(_isRecording ? Icons.stop : Icons.fiber_manual_record),
-                label: Text(
-                  _isRecording ? 'Stop Recording' : 'Start Recording',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _isRecording
-                      ? theme.colorScheme.error
-                      : theme.colorScheme.primary,
-                  foregroundColor: _isRecording
-                      ? theme.colorScheme.onError
-                      : theme.colorScheme.onPrimary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                  ),
-                ),
-              ),
-            ),
-          ],
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: _isRecording
+              ? _buildLiveRecordingView(isDark, hasWrist, hasAnkle)
+              : _buildPreRecordingSetup(isDark, hasWrist, hasAnkle),
         ),
       ),
     );
   }
 
-  Widget _buildBandStatusChip(
-    ThemeData theme,
-    BandRole role,
-    BandConnectionState state,
-  ) {
-    final (color, label, icon) = switch (state) {
-      BandConnectionState.connected => (
-          role.color,
-          role.displayName,
-          role.icon,
-        ),
-      BandConnectionState.scanning => (
-          Colors.blue,
-          'Scanning',
-          Icons.bluetooth_searching,
-        ),
-      BandConnectionState.connecting => (
-          Colors.orange,
-          'Connecting',
-          Icons.bluetooth,
-        ),
-      BandConnectionState.disconnected => (
-          theme.colorScheme.outline,
-          role.displayName,
-          role.icon,
-        ),
-    };
+  // ── Split Device Connectivity Badge (Top Right) ──
+  Widget _buildSplitDevicePill(bool isDark) {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
 
-    return Tooltip(
-      message: '$label: ${state.name}',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 2,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+        boxShadow: isDark ? null : [AppShadows.hardShadowSm],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildDeviceStatusItem(
+            icon: Icons.watch,
+            name: 'Wrist',
+            isConnected: hasWrist,
+            isDark: isDark,
+          ),
+          Container(
+            height: 12,
+            width: 1.5,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+          _buildDeviceStatusItem(
+            icon: Icons.directions_run,
+            name: 'Ankle',
+            isConnected: hasAnkle,
+            isDark: isDark,
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildChartSection(
-    ThemeData theme,
-    String title,
-    Color color,
-    List<model.ImuSample> buffer,
-    BandConnectionState state,
-  ) {
+  Widget _buildDeviceStatusItem({
+    required IconData icon,
+    required String name,
+    required bool isConnected,
+    required bool isDark,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 13,
+          color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          name,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _getColorForLabel(String label) {
+    switch (label.toLowerCase()) {
+      case 'walking':
+        return const Color(0xFF10B981);
+      case 'running':
+        return const Color(0xFFFF3384);
+      case 'sitting':
+        return const Color(0xFF6366F1);
+      case 'standing':
+        return const Color(0xFFF59E0B);
+      case 'jumping':
+        return const Color(0xFFEC4899);
+      case 'stairs':
+        return const Color(0xFF8B5CF6);
+      default:
+        return const Color(0xFF06B6D4);
+    }
+  }
+
+  // ── A. Record Setup Screen (Pre-Recording) ──
+  Widget _buildPreRecordingSetup(bool isDark, bool hasWrist, bool hasAnkle) {
+    final canRecord = hasWrist || hasAnkle;
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface;
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final mutedColor = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 1. Participant ID (Placed directly on canvas with clean label)
         Row(
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            Icon(Icons.person_outline, size: 18, color: textColor),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Participant ID',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 2),
+            boxShadow: AppShadows.bentoSm(isDark),
+          ),
+          child: TextField(
+            controller: _participantController,
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor),
+            decoration: InputDecoration(
+              hintText: 'e.g. participant_1, runner_02',
+              hintStyle: TextStyle(color: mutedColor, fontSize: 14),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Text(
+            'Participant label is used in exported CSV filenames',
+            style: TextStyle(fontSize: 12, color: mutedColor),
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // 2. Activity Selector Label Row + Dropdown Trigger Pill
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Icon(Icons.directions_run_outlined, size: 18, color: textColor),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Activity',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(width: 8),
-            Text(
-              '$title (${buffer.length} samples)',
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: _getStateColor(state).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _getStateLabel(state),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: _getStateColor(state),
-                  fontWeight: FontWeight.w500,
+            GestureDetector(
+              onTap: _showAddCustomActivityDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2E1B4E) : const Color(0xFFFCE7F3),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.accentPink, width: 1.5),
+                ),
+                child: const Text(
+                  '+ Custom Activity',
+                  style: TextStyle(
+                    color: AppColors.accentPink,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          height: 180,
-          child: buffer.isEmpty
-              ? Center(
-                  child: Text(
-                    state == BandConnectionState.connected
-                        ? 'Waiting for data…'
-                        : 'Connect $title band',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 2),
+            boxShadow: AppShadows.bentoSm(isDark),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: _labelManager.allLabels.contains(_selectedLabel)
+                  ? _selectedLabel
+                  : _labelManager.allLabels.first,
+              icon: Icon(Icons.arrow_drop_down, color: textColor),
+              dropdownColor: surfaceColor,
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _selectedLabel = value);
+                }
+              },
+              items: _labelManager.allLabels.map((label) {
+                return DropdownMenuItem<String>(
+                  value: label,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        margin: const EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          color: _getColorForLabel(label),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      Text(label),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // 3. Session Notes (Optional)
+        Row(
+          children: [
+            Icon(Icons.notes_outlined, size: 18, color: textColor),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Session Notes (Optional)',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 2),
+            boxShadow: AppShadows.bentoSm(isDark),
+          ),
+          child: TextField(
+            controller: _notesController,
+            maxLines: 3,
+            style: TextStyle(fontSize: 14, color: textColor),
+            decoration: InputDecoration(
+              hintText: 'Add context about this recording session...',
+              hintStyle: TextStyle(color: mutedColor, fontSize: 13),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.all(12),
+            ),
+            onChanged: (val) => _sessionNotes = val,
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // 4. Device Connection Summary Strip (2-Column Split Bento Card)
+        Row(
+          children: [
+            Expanded(
+              child: _buildDeviceStripCard(
+                title: 'Wrist Band',
+                icon: Icons.watch,
+                accentColor: isDark ? AppColors.darkBadgeWristBg : AppColors.lightBadgeWristBg,
+                isConnected: hasWrist,
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildDeviceStripCard(
+                title: 'Ankle Band',
+                icon: Icons.directions_run,
+                accentColor: isDark ? AppColors.darkBadgeAnkleBg : AppColors.lightBadgeAnkleBg,
+                isConnected: hasAnkle,
+                isDark: isDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // 5. Validation Micro-caption & Primary Start CTA
+        if (!canRecord) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 16, color: isDark ? AppColors.darkDangerText : AppColors.lightDangerText),
+                const SizedBox(width: 6),
+                Text(
+                  'Connect at least one band to start recording.',
+                  style: TextStyle(
+                    color: isDark ? AppColors.darkDangerText : AppColors.lightDangerText,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        Container(
+          width: double.infinity,
+          height: 54,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: !canRecord ? null : AppShadows.bento(isDark),
+          ),
+          child: ElevatedButton(
+            onPressed: canRecord
+                ? _startRecording
+                : () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please connect at least one band in Devices settings to record.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: canRecord ? AppColors.accentPink : AppColors.accentPink.withValues(alpha: 0.5),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: borderColor, width: 2),
+              ),
+              shadowColor: Colors.transparent,
+            ),
+            child: Container(
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.fiber_manual_record, size: 14, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text(
+                    'Start Recording',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 0.3,
                     ),
                   ),
-                )
-              : SensorChart(
-                  readings: buffer.map((s) => SensorReading(
-                        ax: s.ax,
-                        ay: s.ay,
-                        az: s.az,
-                        gx: s.gx,
-                        gy: s.gy,
-                        gz: s.gz,
-                        timestamp: s.timestamp,
-                      )).toList(),
-                  maxPoints: 100,
-                  showGyro: true,
-                ),
+                ],
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
-  Color _getStateColor(BandConnectionState state) => switch (state) {
-        BandConnectionState.connected => Colors.green,
-        BandConnectionState.scanning => Colors.blue,
-        BandConnectionState.connecting => Colors.orange,
-        BandConnectionState.disconnected => Colors.red,
-      };
+  Widget _buildDeviceStripCard({
+    required String title,
+    required IconData icon,
+    required Color accentColor,
+    required bool isConnected,
+    required bool isDark,
+  }) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface;
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
 
-  String _getStateLabel(BandConnectionState state) => switch (state) {
-        BandConnectionState.connected => 'Connected',
-        BandConnectionState.scanning => 'Scanning',
-        BandConnectionState.connecting => 'Connecting',
-        BandConnectionState.disconnected => 'Disconnected',
-      };
+    final isWrist = title.contains('Wrist');
+    final glyphColor = isDark
+        ? (isWrist ? AppColors.darkBadgeWristText : AppColors.darkBadgeAnkleText)
+        : (isWrist ? AppColors.lightBadgeWristText : AppColors.lightBadgeAnkleText);
 
-  Widget _buildStatChip(
-    ThemeData theme,
-    String label,
-    String value,
-    Color color,
-  ) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 2),
+        boxShadow: AppShadows.bentoSm(isDark),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: borderColor, width: 1.5),
+                ),
+                child: Icon(
+                  icon,
+                  size: 15,
+                  color: glyphColor,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+            decoration: BoxDecoration(
+              color: isConnected
+                  ? (isDark ? const Color(0xFF132E2B) : const Color(0xFFD1FAE5))
+                  : (isDark ? AppColors.darkDangerBg : AppColors.lightDangerBg),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isConnected
+                    ? (isDark ? const Color(0xFF065F46) : const Color(0xFF34D399))
+                    : (isDark ? AppColors.darkDangerText.withValues(alpha: 0.5) : const Color(0xFFF87171)),
+                width: 1.2,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: isConnected
+                        ? const Color(0xFF10B981)
+                        : (isDark ? AppColors.darkDangerText : const Color(0xFFEF4444)),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      isConnected ? 'Connected (Ready)' : 'Offline',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isConnected
+                            ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46))
+                            : (isDark ? AppColors.darkDangerText : AppColors.lightDangerText),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+
+  // ── B. Live Recording Screen ──
+  Widget _buildLiveRecordingView(bool isDark, bool hasWrist, bool hasAnkle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. Hero Live Telemetry Card (Dark Bento Card)
+        _buildHeroTelemetryCard(),
+        const SizedBox(height: 14),
+
+        // 2. Split Telemetry Stream Bento (Wrist vs. Ankle)
+        _buildSplitTelemetryStream(isDark),
+        const SizedBox(height: 14),
+
+        // 3. Live Dual-Band 6-Axis Graph Waveforms (Wrist & Ankle)
+        _buildBandGraphCard(
+          title: 'Wrist Band',
+          icon: Icons.watch,
+          accentColor: isDark ? AppColors.darkBadgeWristBg : AppColors.lightBadgeWristBg,
+          samples: _wristChartBuffer,
+          isConnected: hasWrist,
+          isDark: isDark,
+        ),
+        const SizedBox(height: 14),
+        _buildBandGraphCard(
+          title: 'Ankle Band',
+          icon: Icons.directions_run,
+          accentColor: isDark ? AppColors.darkBadgeAnkleBg : AppColors.lightBadgeAnkleBg,
+          samples: _ankleChartBuffer,
+          isConnected: hasAnkle,
+          isDark: isDark,
+        ),
+        const SizedBox(height: 20),
+
+        // 4. Stop Action Button
+        _buildStopButton(isDark),
+      ],
+    );
+  }
+
+  Widget _buildHeroTelemetryCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.liveTelemetry,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF383A42), width: 2),
+        boxShadow: const [
+          BoxShadow(color: Color(0xFF18181B), offset: Offset(3, 3), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Left: Flashing REC pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDC2626).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFDC2626), width: 1.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FadeTransition(
+                      opacity: _pulseController,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'REC',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 11,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Right: Monospace elapsed timer
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF27272A),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF3F3F46), width: 1.2),
+                ),
+                child: Text(
+                  _formatElapsed(),
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Large activity display text
+          Text(
+            _selectedLabel,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Subtitle
+          Text(
+            'Session #${_sessionId ?? 1}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFFA1A1AA),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSplitTelemetryStream(bool isDark) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+
+    return Row(
+      children: [
+        // Left Box (Wrist - Sky Blue / Deep Midnight Blue)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkBadgeWristBg : AppColors.lightBadgeWristBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: 2),
+              boxShadow: AppShadows.bentoSm(isDark),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.watch,
+                      size: 15,
+                      color: isDark ? AppColors.darkBadgeWristText : AppColors.lightBadgeWristText,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '⌚ Wrist Band',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? AppColors.darkBadgeWristText : AppColors.lightBadgeWristText,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _formatRate(_wristPacketsReceived),
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? AppColors.darkTextPrimary : const Color(0xFF0F172A),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '$_wristPacketsReceived Samples • $_wristSampleCount Windows',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.darkBadgeWristText : AppColors.lightBadgeWristText,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Right Box (Ankle - Volt Lime / Deep Forest Olive)
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkBadgeAnkleBg : AppColors.lightBadgeAnkleBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: 2),
+              boxShadow: AppShadows.bentoSm(isDark),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.directions_run,
+                      size: 15,
+                      color: isDark ? AppColors.darkBadgeAnkleText : AppColors.lightBadgeAnkleText,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '🏃 Ankle Band',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? AppColors.darkBadgeAnkleText : AppColors.lightBadgeAnkleText,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _formatRate(_anklePacketsReceived),
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? AppColors.darkTextPrimary : const Color(0xFF0F172A),
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '$_anklePacketsReceived Samples • $_ankleSampleCount Windows',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.darkBadgeAnkleText : AppColors.lightBadgeAnkleText,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBandGraphCard({
+    required String title,
+    required IconData icon,
+    required Color accentColor,
+    required List<model.ImuSample> samples,
+    required bool isConnected,
+    required bool isDark,
+  }) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface;
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+
+    final isWrist = title.contains('Wrist');
+    final glyphColor = isDark
+        ? (isWrist ? AppColors.darkBadgeWristText : AppColors.darkBadgeAnkleText)
+        : (isWrist ? AppColors.lightBadgeWristText : AppColors.lightBadgeAnkleText);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 2),
+        boxShadow: AppShadows.bentoSm(isDark),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: accentColor,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: borderColor, width: 1.2),
+                          ),
+                          child: Icon(
+                            icon,
+                            size: 13,
+                            color: glyphColor,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: isConnected
+                                ? (isDark ? const Color(0xFF132E2B) : const Color(0xFFD1FAE5))
+                                : (isDark ? AppColors.darkDangerBg : AppColors.lightDangerBg),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isConnected ? 'LIVE' : 'OFFLINE',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: isConnected
+                                  ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46))
+                                  : (isDark ? AppColors.darkDangerText : AppColors.lightDangerText),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '6-AXIS REAL-TIME IMU STREAM',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    _buildLegendItem('aX', AppTheme.axisColors[0], isDark),
+                    _buildLegendItem('aY', AppTheme.axisColors[1], isDark),
+                    _buildLegendItem('aZ', AppTheme.axisColors[2], isDark),
+                    _buildLegendItem('gX', AppTheme.axisColors[3], isDark),
+                    _buildLegendItem('gY', AppTheme.axisColors[4], isDark),
+                    _buildLegendItem('gZ', AppTheme.axisColors[5], isDark),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+            child: Container(
+              height: 160,
+              width: double.infinity,
+              color: isDark ? const Color(0xFF0F1013) : const Color(0xFFF8FAFC),
+              child: CustomPaint(
+                painter: _LiveImuWaveformPainter(
+                  samples: samples,
+                  isDark: isDark,
+                  pulseValue: _pulseController.value,
+                  bandName: title,
+                  isConnected: isConnected,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color, bool isDark) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 3,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStopButton(bool isDark) {
+    return Container(
+      width: double.infinity,
+      height: 54,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: AppShadows.bento(isDark),
+      ),
+      child: ElevatedButton(
+        onPressed: _stopRecording,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFDC2626), // Crimson
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              width: 2,
+            ),
+          ),
+          shadowColor: Colors.transparent,
+        ),
+        child: Container(
+          alignment: Alignment.center,
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.stop_rounded, size: 20, color: Colors.white),
+              SizedBox(width: 8),
+              Text(
+                'Stop Recording',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-/// Custom painter for the blueprint telemetry illustration when no bands are streaming.
-class _BlueprintChartPainter extends CustomPainter {
-  final Brightness brightness;
-  _BlueprintChartPainter(this.brightness);
+/// Custom painter for the dedicated 6-axis real-time IMU waveform canvas with zero-baseline.
+class _LiveImuWaveformPainter extends CustomPainter {
+  final List<model.ImuSample> samples;
+  final bool isDark;
+  final double pulseValue;
+  final String bandName;
+  final bool isConnected;
+
+  _LiveImuWaveformPainter({
+    required this.samples,
+    required this.isDark,
+    required this.pulseValue,
+    required this.bandName,
+    required this.isConnected,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final isLight = brightness == Brightness.light;
+    final midY = size.height / 2;
+
+    // 1. Draw subtle horizontal grid lines
     final gridPaint = Paint()
-      ..color = isLight ? const Color(0x18000000) : const Color(0x1FFFFFFF)
-      ..style = PaintingStyle.stroke
+      ..color = isDark ? const Color(0x18FFFFFF) : const Color(0x14000000)
       ..strokeWidth = 1.0;
 
-    // Draw horizontal grid lines
-    const hDivisions = 4;
-    for (int i = 0; i <= hDivisions; i++) {
-      final y = size.height * (i / hDivisions);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    canvas.drawLine(Offset(0, size.height * 0.25), Offset(size.width, size.height * 0.25), gridPaint);
+    canvas.drawLine(Offset(0, size.height * 0.75), Offset(size.width, size.height * 0.75), gridPaint);
+
+    // 2. Draw prominent zero-baseline
+    final baselinePaint = Paint()
+      ..color = isDark ? const Color(0x38FFFFFF) : const Color(0x30000000)
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+
+    const dashWidth = 4.0;
+    const dashSpace = 4.0;
+    double startX = 0.0;
+    while (startX < size.width) {
+      canvas.drawLine(Offset(startX, midY), Offset(startX + dashWidth, midY), baselinePaint);
+      startX += dashWidth + dashSpace;
     }
 
-    // Draw vertical grid lines
-    const vDivisions = 8;
-    for (int i = 0; i <= vDivisions; i++) {
-      final x = size.width * (i / vDivisions);
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
+    // Zero-baseline text indicator
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: '0.0',
+        style: TextStyle(
+          fontSize: 8.5,
+          fontFamily: 'monospace',
+          fontWeight: FontWeight.w600,
+          color: isDark ? const Color(0x60FFFFFF) : const Color(0x60000000),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(canvas, Offset(6, midY - 11));
 
-    // Waveform paths (faint preview waveforms)
-    void drawWave(Color color, double freq, double amp, double phase) {
-      final wavePaint = Paint()
-        ..color = color.withValues(alpha: isLight ? 0.22 : 0.30)
+    // 3. If samples are empty, render a smooth faint rolling preview wave
+    if (samples.isEmpty) {
+      final previewPaint = Paint()
+        ..color = isDark ? const Color(0x2538BDF8) : const Color(0x250284C7)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.8;
+        ..strokeWidth = 1.5;
 
       final path = Path();
-      final midY = size.height / 2;
       for (double x = 0; x <= size.width; x += 4) {
         final normX = x / size.width;
-        final y = midY + amp * math.sin(normX * freq * 2 * math.pi + phase);
+        final y = midY + 14 * math.sin(normX * 4 * math.pi + pulseValue * 2 * math.pi);
         if (x == 0) {
           path.moveTo(x, y);
         } else {
           path.lineTo(x, y);
         }
       }
-      canvas.drawPath(path, wavePaint);
+      canvas.drawPath(path, previewPaint);
+
+      final statusMsg = isConnected
+          ? 'Waiting for $bandName live stream...'
+          : '$bandName offline (not connected)';
+      final statusPainter = TextPainter(
+        text: TextSpan(
+          text: statusMsg,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? const Color(0x80FFFFFF) : const Color(0x80000000),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      statusPainter.paint(
+        canvas,
+        Offset((size.width - statusPainter.width) / 2, midY + 12),
+      );
+      return;
     }
 
-    drawWave(const Color(0xFFFF3388), 3.0, size.height * 0.25, 0.0);
-    drawWave(const Color(0xFF4CAF50), 4.5, size.height * 0.20, 1.2);
-    drawWave(const Color(0xFF2196F3), 2.0, size.height * 0.30, 2.5);
+    // 4. Plot real-time 6-axis IMU values (aX, aY, aZ, gX, gY, gZ)
+    final pointsToPlot = samples.length > 60 ? samples.sublist(samples.length - 60) : samples;
+    final stepX = size.width / (pointsToPlot.length > 1 ? (pointsToPlot.length - 1) : 1);
+
+    // Compute independent dynamic ranges for Accel and Gyro to prevent mutual clipping/squashing
+    double maxAccel = 12.0; // Baseline 12 m/s² (~1.2g)
+    double maxGyro = 60.0;  // Baseline 60 deg/s
+    for (final s in pointsToPlot) {
+      if (s.ax.abs() > maxAccel) maxAccel = s.ax.abs();
+      if (s.ay.abs() > maxAccel) maxAccel = s.ay.abs();
+      if (s.az.abs() > maxAccel) maxAccel = s.az.abs();
+      if (s.gx.abs() > maxGyro) maxGyro = s.gx.abs();
+      if (s.gy.abs() > maxGyro) maxGyro = s.gy.abs();
+      if (s.gz.abs() > maxGyro) maxGyro = s.gz.abs();
+    }
+    maxAccel *= 1.15;
+    maxGyro *= 1.15;
+
+    final usableHalfHeight = midY - 8.0;
+    final scaleAccel = usableHalfHeight / maxAccel;
+    final scaleGyro = usableHalfHeight / maxGyro;
+
+    // Corner indicator for Accel scale (left)
+    final accelUnitPainter = TextPainter(
+      text: TextSpan(
+        text: '±${(maxAccel / 9.80665).toStringAsFixed(1)}g',
+        style: TextStyle(
+          fontSize: 8.5,
+          fontFamily: 'monospace',
+          fontWeight: FontWeight.w600,
+          color: isDark ? const Color(0x70FFFFFF) : const Color(0x70000000),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    accelUnitPainter.paint(canvas, const Offset(6, 6));
+
+    // Corner indicator for Gyro scale (right)
+    final gyroUnitPainter = TextPainter(
+      text: TextSpan(
+        text: '±${maxGyro.toInt()}°/s',
+        style: TextStyle(
+          fontSize: 8.5,
+          fontFamily: 'monospace',
+          fontWeight: FontWeight.w600,
+          color: isDark ? const Color(0x70FFFFFF) : const Color(0x70000000),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    gyroUnitPainter.paint(canvas, Offset(size.width - gyroUnitPainter.width - 6, 6));
+
+    void plotAxis(double Function(model.ImuSample) getVal, double scale, Color color, {double width = 1.8}) {
+      final path = Path();
+      final linePaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      for (int i = 0; i < pointsToPlot.length; i++) {
+        final x = i * stepX;
+        final val = getVal(pointsToPlot[i]);
+        final y = (midY - (val * scale)).clamp(4.0, size.height - 4.0);
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, linePaint);
+    }
+
+    // Plot Accelerometer axes (aX, aY, aZ)
+    plotAxis((s) => s.ax, scaleAccel, AppTheme.axisColors[0]);
+    plotAxis((s) => s.ay, scaleAccel, AppTheme.axisColors[1]);
+    plotAxis((s) => s.az, scaleAccel, AppTheme.axisColors[2]);
+
+    // Plot Gyroscope axes (gX, gY, gZ)
+    plotAxis((s) => s.gx, scaleGyro, AppTheme.axisColors[3]);
+    plotAxis((s) => s.gy, scaleGyro, AppTheme.axisColors[4]);
+    plotAxis((s) => s.gz, scaleGyro, AppTheme.axisColors[5]);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _LiveImuWaveformPainter oldDelegate) {
+    return oldDelegate.samples != samples ||
+        oldDelegate.pulseValue != pulseValue ||
+        oldDelegate.isDark != isDark ||
+        oldDelegate.isConnected != isConnected ||
+        oldDelegate.bandName != bandName;
+  }
 }

@@ -22,7 +22,7 @@ class AppTypography {
   static const FontWeight weightLabelBold = FontWeight.w700;
   static const FontWeight weightCaption = FontWeight.w500;
 
-  // ── Light Theme Text Styles ──
+  // ── Light Theme Text Styles (--text-primary: #18181B, --text-secondary: #52525B) ──
 
   /// Display — largest headline, e.g. "82%".
   static TextStyle get display => GoogleFonts.getFont(
@@ -31,7 +31,7 @@ class AppTypography {
         fontWeight: weightDisplay,
         height: 1.1,
         letterSpacing: -1.5,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// H1 — Screen title, e.g. "Your activity today".
@@ -41,7 +41,7 @@ class AppTypography {
         fontWeight: weightH1,
         height: 1.2,
         letterSpacing: -0.5,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// H2 — Section heading, e.g. "Your bands are ready".
@@ -51,7 +51,7 @@ class AppTypography {
         fontWeight: weightH2,
         height: 1.3,
         letterSpacing: 0,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// H3 — Card title / activity label, e.g. "Walking".
@@ -61,7 +61,7 @@ class AppTypography {
         fontWeight: weightH3,
         height: 1.3,
         letterSpacing: 0,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// Body — Supporting information, paragraph text.
@@ -71,7 +71,7 @@ class AppTypography {
         fontWeight: weightBody,
         height: 1.5,
         letterSpacing: 0.15,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// Body medium — Slightly emphasized body text.
@@ -81,17 +81,17 @@ class AppTypography {
         fontWeight: weightBodyMedium,
         height: 1.5,
         letterSpacing: 0.15,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
-  /// Body small — Secondary supporting text.
+  /// Body small — Secondary supporting text (#52525B).
   static TextStyle get bodySmall => GoogleFonts.getFont(
         _fontFamily,
         fontSize: 14,
         fontWeight: weightBody,
         height: 1.4,
         letterSpacing: 0.2,
-        color: const Color(0xFF8C9BA5),
+        color: const Color(0xFF52525B),
       );
 
   /// Label — Button labels, chip text, e.g. "WRIST BAND".
@@ -101,7 +101,7 @@ class AppTypography {
         fontWeight: weightLabel,
         height: 1.4,
         letterSpacing: 0.5,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
   /// Label small — Compact labels.
@@ -111,17 +111,17 @@ class AppTypography {
         fontWeight: weightLabel,
         height: 1.3,
         letterSpacing: 0.5,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       );
 
-  /// Caption — Secondary metadata, timestamps.
+  /// Caption — Secondary metadata, timestamps (#52525B).
   static TextStyle get caption => GoogleFonts.getFont(
         _fontFamily,
         fontSize: 12,
         fontWeight: weightCaption,
         height: 1.3,
         letterSpacing: 0.4,
-        color: const Color(0xFF8C9BA5),
+        color: const Color(0xFF52525B),
       );
 
   /// Monospace — For session IDs, technical values.
@@ -131,22 +131,22 @@ class AppTypography {
         fontWeight: weightBody,
         height: 1.4,
         letterSpacing: 0.5,
-        color: const Color(0xFF111111),
+        color: const Color(0xFF18181B),
       ).copyWith(fontFamily: 'monospace');
 
-  // ── Dark Theme Text Styles (color-adjusted) ──
+  // ── Dark Theme Text Styles (--text-primary: #F4F4F5, --text-secondary: #A1A1AA) ──
 
-  static TextStyle get displayDark => display.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get h1Dark => h1.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get h2Dark => h2.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get h3Dark => h3.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get bodyDark => body.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get bodyMediumDark => bodyMedium.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get bodySmallDark => bodySmall.copyWith(color: const Color(0xFF9BA8B4));
-  static TextStyle get labelDark => label.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get labelSmallDark => labelSmall.copyWith(color: const Color(0xFFF5F3ED));
-  static TextStyle get captionDark => caption.copyWith(color: const Color(0xFF9BA8B4));
-  static TextStyle get monoDark => mono.copyWith(color: const Color(0xFFF5F3ED));
+  static TextStyle get displayDark => display.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get h1Dark => h1.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get h2Dark => h2.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get h3Dark => h3.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get bodyDark => body.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get bodyMediumDark => bodyMedium.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get bodySmallDark => bodySmall.copyWith(color: const Color(0xFFA1A1AA));
+  static TextStyle get labelDark => label.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get labelSmallDark => labelSmall.copyWith(color: const Color(0xFFF4F4F5));
+  static TextStyle get captionDark => caption.copyWith(color: const Color(0xFFA1A1AA));
+  static TextStyle get monoDark => mono.copyWith(color: const Color(0xFFF4F4F5));
 
   // ── Theme-aware getters ──
 

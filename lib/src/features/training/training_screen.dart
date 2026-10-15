@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_radius.dart';
+import '../../core/theme/app_shadows.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../models/evaluation_metrics.dart';
@@ -55,13 +56,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
         return Scaffold(
           backgroundColor: context.background,
           appBar: AppBar(
-            title: const Text('Model Training'),
+            title: Text(
+              'Model Training',
+              style: AppTypography.h2For(brightness).copyWith(fontWeight: FontWeight.w800),
+            ),
             backgroundColor: context.background,
             elevation: 0,
             actions: [
               IconButton(
-                icon: const Icon(Icons.laptop),
-                tooltip: 'Laptop Training Service',
+                icon: const Icon(Icons.laptop_chromebook),
+                tooltip: 'Laptop Service',
                 onPressed: _openLaptopServiceDialog,
               ),
               IconButton(
@@ -70,6 +74,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 onPressed: _controller.loadSessions,
               ),
             ],
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.md,
+              ),
+              child: _buildTrainBottomBar(brightness),
+            ),
           ),
           body: SafeArea(
             child: SingleChildScrollView(
@@ -96,10 +111,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
                   _buildValidationCard(brightness),
                   const SizedBox(height: AppSpacing.lg),
 
-                  // Training Action CTA
-                  _buildTrainAction(brightness),
-                  const SizedBox(height: AppSpacing.lg),
-
                   // Evaluation Results Card
                   if (_controller.lastResult != null) ...[
                     _buildEvaluationResultCard(
@@ -108,6 +119,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     ),
                     const SizedBox(height: AppSpacing.xl),
                   ],
+
+                  // Bottom padding to avoid overlap with bottomNavigationBar
+                  const SizedBox(height: 80),
                 ],
               ),
             ),
@@ -125,11 +139,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: context.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: AppRadius.card,
         border: Border.all(
-          color: context.ink.withValues(alpha: 0.15),
-          width: 1.5,
+          color: AppColors.borderColor(brightness),
+          width: 2.0,
         ),
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,7 +152,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Active Models', style: AppTypography.h3For(brightness)),
+              Text(
+                'Active Models',
+                style: AppTypography.h3For(brightness).copyWith(fontWeight: FontWeight.w800),
+              ),
               if (_ml.canRollback30 || _ml.canRollback60)
                 TextButton.icon(
                   icon: const Icon(Icons.history, size: 16),
@@ -198,7 +216,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         color: context.disabledSurface.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(AppRadius.sm),
         border: Border.all(
-          color: context.ink.withValues(alpha: 0.1),
+          color: AppColors.borderColor(brightness).withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -254,87 +272,188 @@ class _TrainingScreenState extends State<TrainingScreen> {
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: context.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: AppRadius.card,
         border: Border.all(
-          color: context.ink.withValues(alpha: 0.15),
-          width: 1.5,
+          color: AppColors.borderColor(brightness),
+          width: 2.0,
         ),
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Training Configuration', style: AppTypography.h3For(brightness)),
-          const SizedBox(height: AppSpacing.md),
-
-          // Algorithm choice
-          Text('Algorithm', style: AppTypography.captionFor(brightness).copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: AppSpacing.xs),
-          SegmentedButton<MlAlgorithm>(
-            segments: const [
-              ButtonSegment(
-                value: MlAlgorithm.knn,
-                label: Text('K-NN'),
-                icon: Icon(Icons.hub_outlined),
-              ),
-              ButtonSegment(
-                value: MlAlgorithm.logisticRegression,
-                label: Text('Logistic Regression'),
-                icon: Icon(Icons.stacked_line_chart),
-              ),
-            ],
-            selected: {_controller.selectedAlgorithm},
-            onSelectionChanged: (val) {
-              _controller.setAlgorithm(val.first);
-            },
+          Text(
+            'Training Configuration',
+            style: AppTypography.h3For(brightness).copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: AppSpacing.md),
 
-          // Source choice
-          Text('Data Source', style: AppTypography.captionFor(brightness).copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: AppSpacing.xs),
-          SegmentedButton<TrainingDataSource>(
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            segments: const [
-              ButtonSegment(
-                value: TrainingDataSource.wrist,
-                label: Text('Wrist (30)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-              ButtonSegment(
-                value: TrainingDataSource.ankle,
-                label: Text('Ankle (30)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-              ButtonSegment(
-                value: TrainingDataSource.combined,
-                label: Text('Dual (60)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-            ],
-            selected: {_controller.selectedSource},
-            onSelectionChanged: (val) {
-              _controller.setSource(val.first);
-            },
+          // Algorithm choice (Segmented group with 2px borders and #D6F865 active fill)
+          Text(
+            'Algorithm',
+            style: AppTypography.captionFor(brightness).copyWith(fontWeight: FontWeight.w700),
           ),
+          const SizedBox(height: AppSpacing.xs),
+          _buildBentoAlgorithmSelector(brightness),
+          const SizedBox(height: AppSpacing.md),
+
+          // Source choice (Segmented group with 2px borders and #FF3384 active fill)
+          Text(
+            'Data Source',
+            style: AppTypography.captionFor(brightness).copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          _buildBentoDataSourceSelector(brightness),
         ],
       ),
     );
   }
 
+  Widget _buildBentoAlgorithmSelector(Brightness brightness) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildBentoSegmentItem(
+            label: 'K-NN',
+            icon: Icons.hub_outlined,
+            isSelected: _controller.selectedAlgorithm == MlAlgorithm.knn,
+            activeColor: AppColors.accentLime,
+            activeTextColor: const Color(0xFF18181B),
+            brightness: brightness,
+            onTap: () => _controller.setAlgorithm(MlAlgorithm.knn),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: _buildBentoSegmentItem(
+            label: 'Logistic Regression',
+            icon: Icons.stacked_line_chart,
+            isSelected: _controller.selectedAlgorithm == MlAlgorithm.logisticRegression,
+            activeColor: AppColors.accentLime,
+            activeTextColor: const Color(0xFF18181B),
+            brightness: brightness,
+            onTap: () => _controller.setAlgorithm(MlAlgorithm.logisticRegression),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBentoDataSourceSelector(Brightness brightness) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildBentoSegmentItem(
+            label: 'Wrist (30)',
+            icon: Icons.watch_outlined,
+            isSelected: _controller.selectedSource == TrainingDataSource.wrist,
+            activeColor: AppColors.accentPink,
+            activeTextColor: Colors.white,
+            brightness: brightness,
+            onTap: () => _controller.setSource(TrainingDataSource.wrist),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildBentoSegmentItem(
+            label: 'Ankle (30)',
+            icon: Icons.directions_walk,
+            isSelected: _controller.selectedSource == TrainingDataSource.ankle,
+            activeColor: AppColors.accentPink,
+            activeTextColor: Colors.white,
+            brightness: brightness,
+            onTap: () => _controller.setSource(TrainingDataSource.ankle),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildBentoSegmentItem(
+            label: 'Dual (60)',
+            icon: Icons.sync_alt,
+            isSelected: _controller.selectedSource == TrainingDataSource.combined,
+            activeColor: AppColors.accentPink,
+            activeTextColor: Colors.white,
+            brightness: brightness,
+            onTap: () => _controller.setSource(TrainingDataSource.combined),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBentoSegmentItem({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required Color activeColor,
+    required Color activeTextColor,
+    required Brightness brightness,
+    required VoidCallback onTap,
+  }) {
+    final borderColor = AppColors.borderColor(brightness);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : context.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: borderColor,
+              width: 2.0,
+            ),
+            boxShadow: isSelected ? AppShadows.hardSm(brightness) : AppShadows.none,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isSelected ? activeTextColor : AppColors.textSecondary(brightness),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: label.length > 14 ? 10.0 : 11.0,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected ? activeTextColor : AppColors.textPrimary(brightness),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSessionSelectorSection(Brightness brightness) {
-    final sessions = _controller.availableSessions;
+    // De-duplicate session selection list strictly by id
+    final rawSessions = _controller.availableSessions;
+    final seen = <int>{};
+    final sessions = rawSessions.where((s) => s.id != null && seen.add(s.id!)).toList();
     final selectedCount = _controller.selectedSessionIds.length;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: context.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: AppRadius.card,
         border: Border.all(
-          color: context.ink.withValues(alpha: 0.15),
-          width: 1.5,
+          color: AppColors.borderColor(brightness),
+          width: 2.0,
         ),
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,35 +461,58 @@ class _TrainingScreenState extends State<TrainingScreen> {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  'Select Sessions ($selectedCount)',
-                  style: AppTypography.h3For(brightness).copyWith(fontSize: 16),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Select Sessions',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary(brightness),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentSkyBlue.withValues(alpha: brightness == Brightness.light ? 1.0 : 0.25),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.borderColor(brightness),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        '$selectedCount',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: brightness == Brightness.light ? const Color(0xFF0369A1) : const Color(0xFF93C5FD),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              TextButton(
-                onPressed: _controller.selectAll,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: Size.zero,
-                ),
-                child: const Text('All'),
+              const SizedBox(width: 8),
+              _buildBentoSmallButton(
+                label: 'All',
+                brightness: brightness,
+                onTap: _controller.selectAll,
               ),
-              const SizedBox(width: 4),
-              TextButton(
-                onPressed: _controller.clearSelection,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: Size.zero,
-                ),
-                child: const Text('Clear'),
+              const SizedBox(width: 6),
+              _buildBentoSmallButton(
+                label: 'Clear',
+                brightness: brightness,
+                onTap: _controller.clearSelection,
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           if (sessions.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
@@ -384,34 +526,110 @@ class _TrainingScreenState extends State<TrainingScreen> {
             )
           else
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
+              constraints: const BoxConstraints(maxHeight: 240),
               child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: sessions.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final s = sessions[index];
                   final isSelected = _controller.selectedSessionIds.contains(s.id);
-                  return CheckboxListTile(
-                    dense: true,
-                    title: Text(
-                      'Session #${s.id}: ${s.label}',
-                      style: AppTypography.bodyFor(brightness).copyWith(
-                        fontWeight: FontWeight.w600,
+                  return InkWell(
+                    onTap: () => _controller.toggleSession(s.id!),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppColors.primaryAccent(brightness).withValues(alpha: 0.08)
+                            : context.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppColors.primaryAccent(brightness)
+                              : AppColors.borderColor(brightness).withValues(alpha: 0.3),
+                          width: isSelected ? 1.5 : 1.0,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Session #${s.id}: ${s.label}',
+                                  style: AppTypography.bodyMediumFor(brightness).copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${s.sampleCount} samples • ${_formatDate(s.startTime)}',
+                                  style: AppTypography.captionFor(brightness).copyWith(
+                                    color: AppColors.textSecondary(brightness),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: isSelected ? AppColors.brandPink : Colors.transparent,
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: isSelected ? AppColors.brandPink : AppColors.borderColor(brightness),
+                                width: 2,
+                              ),
+                            ),
+                            child: isSelected
+                                ? const Icon(Icons.check, size: 16, color: Colors.white)
+                                : null,
+                          ),
+                        ],
                       ),
                     ),
-                    subtitle: Text(
-                      '${s.sampleCount} samples • ${_formatDate(s.startTime)}',
-                      style: AppTypography.captionFor(brightness),
-                    ),
-                    value: isSelected,
-                    activeColor: context.primaryAccent,
-                    onChanged: (_) => _controller.toggleSession(s.id!),
                   );
                 },
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBentoSmallButton({
+    required String label,
+    required Brightness brightness,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: context.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: AppColors.borderColor(brightness),
+              width: 1.5,
+            ),
+            boxShadow: AppShadows.hardSm(brightness),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary(brightness),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -423,13 +641,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: context.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: AppRadius.card,
         border: Border.all(
           color: val != null && !val.isValid
-              ? context.danger
-              : context.ink.withValues(alpha: 0.15),
-          width: 1.5,
+              ? AppColors.accentDanger
+              : AppColors.borderColor(brightness),
+          width: 2.0,
         ),
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -437,12 +656,21 @@ class _TrainingScreenState extends State<TrainingScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Dataset Readiness', style: AppTypography.h3For(brightness)),
+              Text(
+                'Dataset Readiness',
+                style: AppTypography.h3For(brightness).copyWith(fontWeight: FontWeight.w800),
+              ),
               OutlinedButton(
                 onPressed: _controller.hasSelection ? _controller.validateDataset : null,
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(80, 36),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  side: BorderSide(
+                    color: _controller.hasSelection
+                        ? AppColors.borderColor(brightness)
+                        : AppColors.borderColor(brightness).withValues(alpha: 0.3),
+                    width: 1.5,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
@@ -455,20 +683,22 @@ class _TrainingScreenState extends State<TrainingScreen> {
           if (val == null)
             Text(
               'Select sessions and tap Validate to check window readiness.',
-              style: AppTypography.captionFor(brightness),
+              style: AppTypography.captionFor(brightness).copyWith(
+                color: AppColors.textSecondary(brightness),
+              ),
             )
           else if (!val.isValid) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.error_outline, size: 18, color: context.danger),
+                const Icon(Icons.error_outline, size: 18, color: AppColors.accentDanger),
                 const SizedBox(width: AppSpacing.xs),
                 Expanded(
                   child: Text(
                     val.message,
-                    style: AppTypography.bodyFor(brightness).copyWith(
-                      color: context.danger,
-                      fontWeight: FontWeight.w600,
+                    style: AppTypography.bodyMediumFor(brightness).copyWith(
+                      color: AppColors.accentDanger,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -477,12 +707,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
           ] else ...[
             Row(
               children: [
-                Icon(Icons.check_circle_outline, size: 18, color: context.success),
+                const Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF16A34A)),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
                   val.message,
-                  style: AppTypography.bodyFor(brightness).copyWith(
-                    color: context.success,
+                  style: AppTypography.bodyMediumFor(brightness).copyWith(
+                    color: const Color(0xFF16A34A),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -493,10 +723,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
               spacing: 6,
               runSpacing: 6,
               children: [
-                _buildBadge('${val.windowCount} windows', context.primaryAccent),
-                _buildBadge('${val.labelCount} classes', context.secondaryStrong),
+                _buildBadge('${val.windowCount} windows', AppColors.primaryAccent(brightness)),
+                _buildBadge('${val.labelCount} classes', AppColors.secondaryStrong(brightness)),
                 for (final entry in val.labelDistribution.entries)
-                  _buildBadge('${entry.key}: ${entry.value}', context.secondaryInfo),
+                  _buildBadge('${entry.key}: ${entry.value}', AppColors.secondaryInfo(brightness)),
               ],
             ),
           ],
@@ -517,30 +747,40 @@ class _TrainingScreenState extends State<TrainingScreen> {
         label,
         style: TextStyle(
           fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
           color: color,
         ),
       ),
     );
   }
 
-  Widget _buildTrainAction(Brightness brightness) {
+  Widget _buildTrainBottomBar(Brightness brightness) {
     if (_controller.isTraining) {
       return Container(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 14),
         decoration: BoxDecoration(
           color: context.surface,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: context.primaryAccent, width: 1.5),
+          borderRadius: AppRadius.button,
+          border: Border.all(color: AppColors.borderColor(brightness), width: 2.0),
+          boxShadow: AppShadows.hard(brightness),
         ),
-        child: Column(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              _controller.currentProgress?.status ?? 'Training in progress…',
-              style: AppTypography.captionFor(brightness).copyWith(
-                fontWeight: FontWeight.w600,
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.brandPink),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _controller.currentProgress?.status ?? 'Training in progress…',
+                style: AppTypography.bodySmallFor(brightness).copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -548,10 +788,32 @@ class _TrainingScreenState extends State<TrainingScreen> {
       );
     }
 
+    final selectedCount = _controller.selectedSessionIds.length;
+    final canTrain = _controller.canTrain;
+
+    // Prerequisite state: [ Train Model ] disabled with clean helper tooltip if 0 sessions selected
+    if (selectedCount == 0) {
+      return PrimaryButton(
+        label: 'Train Model',
+        leadingIcon: Icons.model_training,
+        isDisabled: true,
+        tooltip: 'Select at least 1 session to validate & train',
+        onPressed: null,
+      );
+    }
+
+    if (!canTrain) {
+      return PrimaryButton(
+        label: 'Validate Dataset First',
+        leadingIcon: Icons.rule,
+        onPressed: _controller.validateDataset,
+      );
+    }
+
     return PrimaryButton(
       label: 'Train Model',
       leadingIcon: Icons.model_training,
-      onPressed: _controller.canTrain ? _controller.train : null,
+      onPressed: _controller.train,
     );
   }
 
@@ -565,11 +827,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: context.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderRadius: AppRadius.card,
         border: Border.all(
-          color: result.success ? context.success : context.danger,
-          width: 1.5,
+          color: result.success ? AppColors.accentLime : AppColors.accentDanger,
+          width: 2.0,
         ),
+        boxShadow: AppShadows.hard(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,14 +841,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
             children: [
               Icon(
                 result.success ? Icons.verified : Icons.error,
-                color: result.success ? context.success : context.danger,
+                color: result.success ? const Color(0xFF16A34A) : AppColors.accentDanger,
                 size: 20,
               ),
               const SizedBox(width: AppSpacing.xs),
-              Text(
-                result.message,
-                style: AppTypography.h3For(brightness).copyWith(
-                  color: result.success ? context.success : context.danger,
+              Expanded(
+                child: Text(
+                  result.message,
+                  style: AppTypography.h3For(brightness).copyWith(
+                    color: result.success ? const Color(0xFF16A34A) : AppColors.accentDanger,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -749,14 +1016,45 @@ class _TrainingScreenState extends State<TrainingScreen> {
     await showDialog(
       context: context,
       builder: (context) {
+        final brightness = Theme.of(context).brightness;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Row(
+              backgroundColor: context.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: AppRadius.card,
+                side: BorderSide(
+                  color: AppColors.borderColor(brightness),
+                  width: 2.0,
+                ),
+              ),
+              titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              title: Row(
                 children: [
-                  Icon(Icons.laptop_chromebook),
-                  SizedBox(width: 8),
-                  Text('Laptop Training Service'),
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryAccent(brightness).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.borderColor(brightness), width: 1.5),
+                    ),
+                    child: Icon(
+                      Icons.laptop_chromebook,
+                      size: 20,
+                      color: AppColors.primaryAccent(brightness),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Laptop Service',
+                      style: AppTypography.h3For(brightness).copyWith(fontWeight: FontWeight.w800),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
                 ],
               ),
               content: SingleChildScrollView(
@@ -764,22 +1062,39 @@ class _TrainingScreenState extends State<TrainingScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Connect to the local Python training service running on your laptop.\n'
                       'Use "adb reverse tcp:8000 tcp:8000" for USB or enter LAN IP.',
-                      style: TextStyle(fontSize: 12),
+                      style: AppTypography.captionFor(brightness).copyWith(
+                        color: AppColors.textSecondary(brightness),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: hostController,
-                      decoration: const InputDecoration(
+                      style: AppTypography.bodyMediumFor(brightness),
+                      decoration: InputDecoration(
                         labelText: 'Host URL',
                         hintText: 'http://127.0.0.1:8000 or http://10.0.2.2:8000',
-                        border: OutlineInputBorder(),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: AppColors.borderColor(brightness), width: 1.5),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: AppColors.borderColor(brightness), width: 1.5),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: AppColors.primaryAccent(brightness), width: 2.0),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Row(
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         FilledButton.tonal(
                           onPressed: isChecking
@@ -793,52 +1108,76 @@ class _TrainingScreenState extends State<TrainingScreen> {
                                     isChecking = false;
                                   });
                                 },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.accentLime,
+                            foregroundColor: const Color(0xFF18181B),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                           child: isChecking
                               ? const SizedBox(
                                   width: 14,
                                   height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF18181B)),
                                 )
-                              : const Text('Test Connection'),
+                              : const Text('Test Connection', style: TextStyle(fontWeight: FontWeight.w700)),
                         ),
-                        const SizedBox(width: 12),
                         if (isConnected != null)
-                          Row(
-                            children: [
-                              Icon(
-                                isConnected! ? Icons.check_circle : Icons.error,
-                                color: isConnected! ? Colors.green : Colors.orange,
-                                size: 16,
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isConnected!
+                                  ? const Color(0xFF16A34A).withValues(alpha: 0.15)
+                                  : AppColors.accentDanger.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isConnected! ? const Color(0xFF16A34A) : AppColors.accentDanger,
+                                width: 1.5,
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                isConnected! ? 'Connected' : 'Unreachable',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: isConnected! ? Colors.green : Colors.orange,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isConnected! ? Icons.check_circle : Icons.error,
+                                  color: isConnected! ? const Color(0xFF16A34A) : AppColors.accentDanger,
+                                  size: 14,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 4),
+                                Text(
+                                  isConnected! ? 'Connected' : 'Unreachable',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isConnected! ? const Color(0xFF16A34A) : AppColors.accentDanger,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    const Divider(),
+                    Divider(color: AppColors.borderColor(brightness).withValues(alpha: 0.2)),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Import Model Artifact (JSON)',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      style: AppTypography.bodyMediumFor(brightness).copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'You can paste a model artifact JSON exported from the laptop service to activate it directly.',
-                      style: TextStyle(fontSize: 11),
+                      style: AppTypography.captionFor(brightness).copyWith(
+                        color: AppColors.textSecondary(brightness),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       icon: const Icon(Icons.file_download_outlined, size: 16),
                       label: const Text('Paste & Import Artifact'),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: AppColors.borderColor(brightness), width: 1.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
                       onPressed: () async {
                         final jsonController = TextEditingController();
                         bool isCombined = false;
@@ -846,30 +1185,54 @@ class _TrainingScreenState extends State<TrainingScreen> {
                           context: context,
                           builder: (c) => StatefulBuilder(
                             builder: (c, setImportState) => AlertDialog(
-                              title: const Text('Import Model JSON'),
+                              backgroundColor: context.surface,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: AppRadius.card,
+                                side: BorderSide(color: AppColors.borderColor(brightness), width: 2.0),
+                              ),
+                              title: Text(
+                                'Import Model JSON',
+                                style: AppTypography.h3For(brightness).copyWith(fontWeight: FontWeight.w800),
+                              ),
                               content: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   TextField(
                                     controller: jsonController,
                                     maxLines: 4,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       hintText: '{"formatVersion": 2, "algorithm": "...", ...}',
-                                      border: OutlineInputBorder(),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: BorderSide(color: AppColors.borderColor(brightness), width: 1.5),
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   SwitchListTile(
                                     dense: true,
-                                    title: const Text('Is Dual-Band (60 features)'),
+                                    title: Text(
+                                      'Is Dual-Band (60 features)',
+                                      style: AppTypography.bodySmallFor(brightness).copyWith(fontWeight: FontWeight.w600),
+                                    ),
                                     value: isCombined,
                                     onChanged: (v) => setImportState(() => isCombined = v),
                                   ),
                                 ],
                               ),
                               actions: [
-                                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-                                FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Activate')),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(c, false),
+                                  child: Text('Cancel', style: TextStyle(color: AppColors.textSecondary(brightness))),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(c, true),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.brandPink,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('Activate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                ),
                               ],
                             ),
                           ),
@@ -895,7 +1258,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Close'),
+                  child: Text('Close', style: TextStyle(color: AppColors.textPrimary(brightness), fontWeight: FontWeight.w700)),
                 ),
               ],
             );

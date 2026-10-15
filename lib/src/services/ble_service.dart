@@ -47,6 +47,12 @@ class BandConnection {
   /// Current connection state (synchronous access).
   BandConnectionState get currentState => _state;
 
+  /// For testing/mocking connection state transitions.
+  void updateStateForTesting(BandConnectionState state) {
+    _state = state;
+    _stateController.add(state);
+  }
+
   /// The connected device's platform name, if any.
   String? get deviceName => _device?.platformName;
 
