@@ -56,8 +56,8 @@ class StatusPill extends StatelessWidget {
   /// Creates a connected status pill.
   const StatusPill.connected({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -65,15 +65,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.connected,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.connected;
 
   /// Creates a disconnected status pill.
   const StatusPill.disconnected({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -81,15 +79,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.disconnected,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.disconnected;
 
   /// Creates a connecting/scanning status pill.
   const StatusPill.connecting({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -97,15 +93,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.connecting,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.connecting;
 
   /// Creates a recording status pill.
   const StatusPill.recording({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -113,15 +107,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.recording,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.recording;
 
   /// Creates a ready/active status pill.
   const StatusPill.ready({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -129,15 +121,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.ready,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.ready;
 
   /// Creates an unavailable/not ready status pill.
   const StatusPill.unavailable({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -145,15 +135,13 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.unavailable,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.unavailable;
 
   /// Creates a warning status pill.
   const StatusPill.warning({
     super.key,
-    String? text,
-    IconData? icon,
+    this.text,
+    this.icon,
     this.showIcon = true,
     this.textStyle,
     this.backgroundColor,
@@ -161,27 +149,21 @@ class StatusPill extends StatelessWidget {
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.warning,
-       text = text,
-       icon = icon;
+  }) : variant = StatusPillVariant.warning;
 
   /// Creates a custom status pill with explicit colors.
   const StatusPill.custom({
     super.key,
-    required String text,
-    required IconData icon,
-    required Color backgroundColor,
-    required Color foregroundColor,
+    required this.text,
+    required this.icon,
+    required this.backgroundColor,
+    required this.foregroundColor,
     this.showIcon = true,
     this.textStyle,
     this.border,
     this.padding,
     this.semanticsLabel,
-  }) : variant = StatusPillVariant.custom,
-       text = text,
-       icon = icon,
-       backgroundColor = backgroundColor,
-       foregroundColor = foregroundColor;
+  }) : variant = StatusPillVariant.custom;
 
   @override
   Widget build(BuildContext context) {

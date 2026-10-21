@@ -14,10 +14,68 @@ import '../../models/imu_sample.dart' as model;
 import '../../services/activity_label_manager.dart';
 import '../../services/ble_service.dart';
 import '../../services/database_service.dart';
+import '../../services/fitness_metrics_service.dart';
 import '../../services/ml_service.dart';
 import '../../utils/cadence_gate.dart';
 import '../../utils/dual_band_window_manager.dart';
 import '../../utils/session_boundary.dart';
+
+/// Flow states for Record Mode:
+/// - [idle]: No bands connected, pre-recording setup.
+/// - [testingConnection]: At least one band connected; streaming live 50 Hz packets to UI only (ZERO DB writes).
+/// - [recordingSession]: Active session recording, persistent DB writes, real-time ML inference & fitness metrics.
+/// - [paused]: Recording temporarily paused.
+enum RecordFlowState {
+  idle,
+  testingConnection,
+  recordingSession,
+  paused,
+}
+
+/// Tracks real-time connection diagnostics (Hz rate, sequence drops, SD status, latest IMU values).
+class BandLiveDiagnostics {
+  int packetsReceived = 0;
+  int lastSeq = -1;
+  int droppedPackets = 0;
+  bool isSdOk = false;
+  double liveHz = 0.0;
+  model.ImuSample? latestSample;
+
+  final List<DateTime> _arrivalTimes = [];
+
+  void onSample(model.ImuSample sample) {
+    packetsReceived++;
+    latestSample = sample;
+    isSdOk = sample.isSdOk;
+
+    if (lastSeq != -1) {
+      final diff = (sample.seq - lastSeq) & 0xFFFF;
+      if (diff > 1 && diff < 1000) {
+        droppedPackets += (diff - 1);
+      }
+    }
+    lastSeq = sample.seq;
+
+    final now = DateTime.now();
+    _arrivalTimes.add(now);
+    _arrivalTimes.removeWhere((t) => now.difference(t).inMilliseconds > 2000);
+    if (_arrivalTimes.length >= 2) {
+      final spanMs = _arrivalTimes.last.difference(_arrivalTimes.first).inMilliseconds;
+      if (spanMs > 0) {
+        liveHz = (_arrivalTimes.length - 1) * 1000.0 / spanMs;
+      }
+    }
+  }
+
+  void reset() {
+    packetsReceived = 0;
+    lastSeq = -1;
+    droppedPackets = 0;
+    liveHz = 0.0;
+    latestSample = null;
+    _arrivalTimes.clear();
+  }
+}
 
 /// Record Mode screen – tag and record IMU data streams with activity labels.
 class RecordScreen extends StatefulWidget {
@@ -34,6 +92,17 @@ class _RecordScreenState extends State<RecordScreen>
   final _labelManager = getIt<ActivityLabelManager>();
 
   // ── Session Setup & Recording state ──
+  RecordFlowState _flowState = RecordFlowState.idle;
+  RecordFlowState get flowState => _flowState;
+
+  final _fitnessMetrics = FitnessMetricsService();
+
+  FitnessMetrics? _currentMetrics;
+  StreamSubscription<FitnessMetrics>? _metricsSub;
+
+  final _wristDiag = BandLiveDiagnostics();
+  final _ankleDiag = BandLiveDiagnostics();
+
   String _selectedLabel = BleConstants.defaultLabels.first;
   String _participantId = 'participant_1';
   final _participantController = TextEditingController(text: 'participant_1');
@@ -62,7 +131,7 @@ class _RecordScreenState extends State<RecordScreen>
     sessionDetector: DualBandSessionDetector(),
   );
 
-  // 40 Hz Cadence Gates
+  // 50 Hz Cadence Gates
   final _cadenceGate = DualBandCadenceGate();
 
   StreamSubscription<model.ImuSample>? _wristSensorSub;
@@ -86,16 +155,36 @@ class _RecordScreenState extends State<RecordScreen>
   // Flag to prevent DB writes after recording stops
   bool _recordingStopped = false;
 
+  // Offline Sync State
+  bool _isWristSyncing = false;
+  bool _isAnkleSyncing = false;
+
   @override
   void initState() {
     super.initState();
     _wristBleState = _ble.wrist.currentState;
     _ankleBleState = _ble.ankle.currentState;
+
+    if (_wristBleState == BandConnectionState.connected ||
+        _ankleBleState == BandConnectionState.connected) {
+      _flowState = RecordFlowState.testingConnection;
+    }
+
     _wristBleSub = _ble.wrist.stateStream.listen((state) {
-      if (mounted) setState(() => _wristBleState = state);
+      if (mounted) {
+        setState(() {
+          _wristBleState = state;
+          _updateFlowStateOnConnectionChange();
+        });
+      }
     });
     _ankleBleSub = _ble.ankle.stateStream.listen((state) {
-      if (mounted) setState(() => _ankleBleState = state);
+      if (mounted) {
+        setState(() {
+          _ankleBleState = state;
+          _updateFlowStateOnConnectionChange();
+        });
+      }
     });
     _pulseController = AnimationController(
       vsync: this,
@@ -113,11 +202,59 @@ class _RecordScreenState extends State<RecordScreen>
     _selectedLabel = _labelManager.allLabels.first;
     _labelManager.addListener(_onLabelsChanged);
 
+
+    // Listen to real-time fitness metrics
+    _metricsSub = _fitnessMetrics.metricsStream.listen((metrics) {
+      if (mounted && _flowState == RecordFlowState.recordingSession) {
+        setState(() {
+          _currentMetrics = metrics;
+        });
+      }
+    });
+
+    // Setup preview sensor stream listeners
+    _ensureSensorSubscriptions();
+
     // Periodic DB flush
     _startDbFlushTimer();
 
     // Periodic diagnostics (every 5 seconds during recording)
     _startDiagnosticsTimer();
+  }
+
+  void _updateFlowStateOnConnectionChange() {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    if (_flowState == RecordFlowState.recordingSession) {
+      return;
+    }
+
+    if (hasWrist || hasAnkle) {
+      _flowState = RecordFlowState.testingConnection;
+    } else {
+      _flowState = RecordFlowState.idle;
+    }
+    _ensureSensorSubscriptions();
+  }
+
+  void _ensureSensorSubscriptions() {
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    if (hasWrist && _wristSensorSub == null) {
+      _wristSensorSub = _ble.wrist.sensorStream.listen(_onWristSensorData);
+    } else if (!hasWrist && _wristSensorSub != null) {
+      _wristSensorSub?.cancel();
+      _wristSensorSub = null;
+    }
+
+    if (hasAnkle && _ankleSensorSub == null) {
+      _ankleSensorSub = _ble.ankle.sensorStream.listen(_onAnkleSensorData);
+    } else if (!hasAnkle && _ankleSensorSub != null) {
+      _ankleSensorSub?.cancel();
+      _ankleSensorSub = null;
+    }
   }
 
   void _onLabelsChanged() {
@@ -199,11 +336,12 @@ class _RecordScreenState extends State<RecordScreen>
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
 
-    // Cancel sensor subscriptions
+    // Cancel sensor & ble subscriptions
     _wristSensorSub?.cancel();
     _ankleSensorSub?.cancel();
     _wristBleSub?.cancel();
     _ankleBleSub?.cancel();
+    _metricsSub?.cancel();
 
     // Final flush if recording
     if (_isRecording) {
@@ -248,6 +386,7 @@ class _RecordScreenState extends State<RecordScreen>
     }
 
     setState(() {
+      _flowState = RecordFlowState.recordingSession;
       _isRecording = true;
       _sessionId = sessionId;
       _wristSampleCount = 0;
@@ -260,7 +399,14 @@ class _RecordScreenState extends State<RecordScreen>
       _anklePacketsReceived = 0;
       _recordingStartTime = DateTime.now();
       _recordingStopped = false; // Reset flag for new recording
+      _currentMetrics = null;
     });
+
+    _fitnessMetrics.startSession();
+    _fitnessMetrics.updateActivity(_selectedLabel);
+
+    _wristDiag.reset();
+    _ankleDiag.reset();
 
     _windowManager.reset();
     _cadenceGate.reset();
@@ -278,20 +424,29 @@ class _RecordScreenState extends State<RecordScreen>
     // Start flush timer
     _startDbFlushTimer();
 
-    // Subscribe to wrist sensor stream
-    if (hasWrist) {
-      _wristSensorSub = _ble.wrist.sensorStream.listen(_onWristSensorData);
-    }
-    // Subscribe to ankle sensor stream
-    if (hasAnkle) {
-      _ankleSensorSub = _ble.ankle.sensorStream.listen(_onAnkleSensorData);
-    }
+    // Ensure sensor subscriptions are listening
+    _ensureSensorSubscriptions();
+
+    // Broadcast START_RECORDING (0x01) with ground-truth activity label
+    unawaited(_ble.startRecording(label: _selectedLabel));
   }
 
   void _onWristSensorData(model.ImuSample sample) {
-    if (!_isRecording || _recordingStopped) return;
+    _wristDiag.onSample(sample);
 
-    // Enforce 40 Hz accepted cadence gate
+    if (mounted) {
+      setState(() {
+        _wristChartBuffer.add(sample);
+        if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
+      });
+    }
+
+    // In Preview (testingConnection), DO NOT perform any database writes or window management
+    if (_flowState != RecordFlowState.recordingSession || !_isRecording || _recordingStopped) {
+      return;
+    }
+
+    // Enforce 50 Hz accepted cadence gate
     final decision = _cadenceGate.wristGate.processSample(sample);
     if (decision == CadenceDecision.droppedBurst ||
         decision == CadenceDecision.droppedDuplicate ||
@@ -304,12 +459,6 @@ class _RecordScreenState extends State<RecordScreen>
     _windowManager.addSample(sample);
 
     _wristPacketsReceived++;
-    if (mounted) {
-      setState(() {
-        _wristChartBuffer.add(sample);
-        if (_wristChartBuffer.length > 100) _wristChartBuffer.removeAt(0);
-      });
-    }
 
     // Bounded pending writes with overflow logging
     if (_wristPendingDbWrite.length >= _maxPendingWrites) {
@@ -323,9 +472,21 @@ class _RecordScreenState extends State<RecordScreen>
   }
 
   void _onAnkleSensorData(model.ImuSample sample) {
-    if (!_isRecording || _recordingStopped) return;
+    _ankleDiag.onSample(sample);
 
-    // Enforce 40 Hz accepted cadence gate
+    if (mounted) {
+      setState(() {
+        _ankleChartBuffer.add(sample);
+        if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
+      });
+    }
+
+    // In Preview (testingConnection), DO NOT perform any database writes or window management
+    if (_flowState != RecordFlowState.recordingSession || !_isRecording || _recordingStopped) {
+      return;
+    }
+
+    // Enforce 50 Hz accepted cadence gate
     final decision = _cadenceGate.ankleGate.processSample(sample);
     if (decision == CadenceDecision.droppedBurst ||
         decision == CadenceDecision.droppedDuplicate ||
@@ -338,12 +499,9 @@ class _RecordScreenState extends State<RecordScreen>
     _windowManager.addSample(sample);
 
     _anklePacketsReceived++;
-    if (mounted) {
-      setState(() {
-        _ankleChartBuffer.add(sample);
-        if (_ankleChartBuffer.length > 100) _ankleChartBuffer.removeAt(0);
-      });
-    }
+
+    // Feed real-time fitness metrics engine
+    _fitnessMetrics.addSample(sample);
 
     // Bounded pending writes with overflow logging
     if (_anklePendingDbWrite.length >= _maxPendingWrites) {
@@ -419,13 +577,9 @@ class _RecordScreenState extends State<RecordScreen>
     // Log final cadence diagnostics before stopping
     _logSamplingDiagnostics();
 
-    // 1. Immediately cancel sensor stream subscriptions so no new incoming packets are accepted
-    await _wristSensorSub?.cancel();
-    _wristSensorSub = null;
-    await _ankleSensorSub?.cancel();
-    _ankleSensorSub = null;
+    _fitnessMetrics.stopSession();
 
-    // 2. Cancel timers and animation
+    // 1. Cancel timers and animation
     _dbFlushTimer?.cancel();
     _dbFlushTimer = null;
     _diagnosticsTimer?.cancel();
@@ -435,13 +589,14 @@ class _RecordScreenState extends State<RecordScreen>
     _pulseController.stop();
     _pulseController.reset();
 
-    // 3. Guaranteed final buffer flush BEFORE marking recording stopped
+    // 2. Guaranteed final buffer flush BEFORE marking recording stopped
     await _flushDbBuffers(force: true);
 
-    // 4. Mark recording stopped
+    // 3. Mark recording stopped and broadcast STOP_RECORDING (0x02) to seal SD buffers
     _recordingStopped = true;
+    unawaited(_ble.stopRecording());
 
-    // 5. Finalize session in DB with exact persisted sample count
+    // 4. Finalize session in DB with exact persisted sample count
     final completedSessionId = _sessionId;
 
     if (completedSessionId != null) {
@@ -467,8 +622,14 @@ class _RecordScreenState extends State<RecordScreen>
         _sessionId = null;
         _sessionNotes = '';
         _notesController.clear();
+        final hasAny = _wristBleState == BandConnectionState.connected ||
+            _ankleBleState == BandConnectionState.connected;
+        _flowState = hasAny ? RecordFlowState.testingConnection : RecordFlowState.idle;
       });
     }
+
+    // Keep sensor subscriptions alive in preview mode if bands remain connected
+    _ensureSensorSubscriptions();
 
     // Navigate to session detail screen
     if (mounted && completedSessionId != null) {
@@ -560,6 +721,114 @@ class _RecordScreenState extends State<RecordScreen>
     final minutes = (elapsed.inMinutes % 60).toString().padLeft(2, '0');
     final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
     return '$hours:$minutes:$seconds';
+  }
+
+  Future<void> _startOfflineSync(BandRole role) async {
+    final connection = _ble.getConnection(role);
+    if (connection.currentState != BandConnectionState.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${role.displayName} band is not connected.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      if (role == BandRole.wrist) {
+        _isWristSyncing = true;
+      } else {
+        _isAnkleSyncing = true;
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Starting offline catch-up sync from ${role.displayName} band MicroSD...'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    // Create a new session in DB for offline data
+    final sessionId = await _db.createSession(
+      'Offline Sync - ${role.displayName}',
+      participantId: _participantId,
+    );
+    await _db.updateSessionNotes(
+      sessionId,
+      'Batch synced from ${role.displayName} band (/raw_imu.bin) at 50 Hz.',
+    );
+
+    final syncBuffer = <model.ImuSample>[];
+    StreamSubscription<model.ImuSample>? sampleSub;
+    StreamSubscription<int>? completeSub;
+
+    sampleSub = connection.offlineSyncSampleStream.listen((sample) async {
+      syncBuffer.add(sample);
+      if (syncBuffer.length >= 50) {
+        final toWrite = List<model.ImuSample>.from(syncBuffer);
+        syncBuffer.clear();
+        await _db.insertImuSamples(sessionId: sessionId, samples: toWrite);
+      }
+    });
+
+    completeSub = connection.offlineSyncCompleteStream.listen((totalCount) async {
+      if (syncBuffer.isNotEmpty) {
+        final toWrite = List<model.ImuSample>.from(syncBuffer);
+        syncBuffer.clear();
+        await _db.insertImuSamples(sessionId: sessionId, samples: toWrite);
+      }
+
+      await sampleSub?.cancel();
+      await completeSub?.cancel();
+
+      final actualTotal = await _db.getSampleCount(sessionId);
+      await _db.endSession(sessionId, actualTotal);
+
+      if (mounted) {
+        setState(() {
+          if (role == BandRole.wrist) {
+            _isWristSyncing = false;
+          } else {
+            _isAnkleSyncing = false;
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              actualTotal > 0
+                  ? 'Offline sync complete: $actualTotal samples synced from ${role.displayName} band!'
+                  : 'Offline sync complete: No stored data found on ${role.displayName} band SD card.',
+            ),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      }
+    });
+
+    final sent = await connection.startOfflineSync();
+    if (!sent) {
+      await sampleSub.cancel();
+      await completeSub.cancel();
+      if (mounted) {
+        setState(() {
+          if (role == BandRole.wrist) {
+            _isWristSyncing = false;
+          } else {
+            _isAnkleSyncing = false;
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send offline sync command to ${role.displayName} band.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -698,6 +967,298 @@ class _RecordScreenState extends State<RecordScreen>
     }
   }
 
+  IconData _getIconForLabel(String label) {
+    switch (label.toLowerCase()) {
+      case 'sitting':
+        return Icons.airline_seat_recline_normal;
+      case 'standing_handmove':
+      case 'standing':
+        return Icons.pan_tool;
+      case 'walking':
+        return Icons.directions_walk;
+      case 'jumping_jacks':
+      case 'jumping':
+        return Icons.sports_kabaddi;
+      case 'running':
+        return Icons.directions_run;
+      default:
+        return Icons.fitness_center;
+    }
+  }
+
+  Widget _buildPreFlightHealthCard(bool isDark) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface;
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final hasWrist = _wristBleState == BandConnectionState.connected;
+    final hasAnkle = _ankleBleState == BandConnectionState.connected;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor, width: 2),
+        boxShadow: AppShadows.bentoSm(isDark),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF10B981), width: 1.2),
+                      ),
+                      child: const Icon(Icons.sensors, size: 14, color: Color(0xFF10B981)),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Pre-Flight Diagnostics',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF132E2B) : const Color(0xFFD1FAE5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF10B981), width: 1),
+                ),
+                child: const Text(
+                  'Preview',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF10B981),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _buildBandDiagnosticColumn(
+                  roleName: 'BANDANA-WRIST',
+                  icon: Icons.watch,
+                  accentColor: isDark ? AppColors.darkBadgeWristBg : AppColors.lightBadgeWristBg,
+                  isConnected: hasWrist,
+                  diag: _wristDiag,
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildBandDiagnosticColumn(
+                  roleName: 'BANDANA-ANKLE',
+                  icon: Icons.directions_run,
+                  accentColor: isDark ? AppColors.darkBadgeAnkleBg : AppColors.lightBadgeAnkleBg,
+                  isConnected: hasAnkle,
+                  diag: _ankleDiag,
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBandDiagnosticColumn({
+    required String roleName,
+    required IconData icon,
+    required Color accentColor,
+    required bool isConnected,
+    required BandLiveDiagnostics diag,
+    required bool isDark,
+  }) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? const Color(0xFF1E2025) : const Color(0xFFF1F5F9);
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final isNominalHz = diag.liveHz >= 48.0 && diag.liveHz <= 52.0;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(icon, size: 14, color: textColor),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        roleName.replaceFirst('BANDANA-', ''),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Live Transmission Rate (Hz)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Rate: ',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                  ),
+                ),
+                Text(
+                  isConnected ? '${diag.liveHz.toStringAsFixed(1)} Hz' : '0.0 Hz',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'monospace',
+                    color: isConnected && isNominalHz ? const Color(0xFF10B981) : textColor,
+                  ),
+                ),
+                if (isConnected && isNominalHz) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.check_circle, size: 13, color: Color(0xFF10B981)),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Drop Rate / Seq Validator & MicroSD Status
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              Text(
+                '${diag.droppedPackets} Drops',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: diag.droppedPackets == 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: diag.isSdOk
+                      ? (isDark ? const Color(0xFF132E2B) : const Color(0xFFD1FAE5))
+                      : (isDark ? const Color(0xFF2E2218) : const Color(0xFFFEF3C7)),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      diag.isSdOk ? Icons.sd_card : Icons.sd_card_alert,
+                      size: 10,
+                      color: diag.isSdOk ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      diag.isSdOk ? 'SD OK' : 'SD Missing',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: diag.isSdOk ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Mini Sparkline / Value Ticker (aX, aY, aZ)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF111215) : const Color(0xFFFFFFFF),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor.withValues(alpha: 0.5), width: 1),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: diag.latestSample != null
+                  ? Text(
+                      'aX:${diag.latestSample!.ax.toStringAsFixed(2)}  aY:${diag.latestSample!.ay.toStringAsFixed(2)}  aZ:${diag.latestSample!.az.toStringAsFixed(2)}g',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                      ),
+                    )
+                  : Text(
+                      'Waiting for stream...',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontFamily: 'monospace',
+                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── A. Record Setup Screen (Pre-Recording) ──
   Widget _buildPreRecordingSetup(bool isDark, bool hasWrist, bool hasAnkle) {
     final canRecord = hasWrist || hasAnkle;
@@ -709,6 +1270,11 @@ class _RecordScreenState extends State<RecordScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (canRecord) ...[
+          _buildPreFlightHealthCard(isDark),
+          const SizedBox(height: 16),
+        ],
+
         // 1. Participant ID (Placed directly on canvas with clean label)
         Row(
           children: [
@@ -1096,6 +1662,37 @@ class _RecordScreenState extends State<RecordScreen>
               ],
             ),
           ),
+          if (isConnected) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 28,
+              child: OutlinedButton.icon(
+                onPressed: (isWrist ? _isWristSyncing : _isAnkleSyncing)
+                    ? null
+                    : () => _startOfflineSync(isWrist ? BandRole.wrist : BandRole.ankle),
+                icon: (isWrist ? _isWristSyncing : _isAnkleSyncing)
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync, size: 13),
+                label: Text(
+                  (isWrist ? _isWristSyncing : _isAnkleSyncing) ? 'Syncing...' : 'Sync Offline',
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  side: BorderSide(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    width: 1.2,
+                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1110,11 +1707,15 @@ class _RecordScreenState extends State<RecordScreen>
         _buildHeroTelemetryCard(),
         const SizedBox(height: 14),
 
-        // 2. Split Telemetry Stream Bento (Wrist vs. Ankle)
+        // 2. 4-Metric Grid Dashboard (Steps, Cadence, Calories, Duration)
+        _build4MetricGrid(isDark),
+        const SizedBox(height: 14),
+
+        // 4. Split Telemetry Stream Bento (Wrist vs. Ankle)
         _buildSplitTelemetryStream(isDark),
         const SizedBox(height: 14),
 
-        // 3. Live Dual-Band 6-Axis Graph Waveforms (Wrist & Ankle)
+        // 5. Live Dual-Band 6-Axis Graph Waveforms (Wrist & Ankle)
         _buildBandGraphCard(
           title: 'Wrist Band',
           icon: Icons.watch,
@@ -1134,9 +1735,134 @@ class _RecordScreenState extends State<RecordScreen>
         ),
         const SizedBox(height: 20),
 
-        // 4. Stop Action Button
+        // 6. Stop Action Button
         _buildStopButton(isDark),
       ],
+    );
+  }
+
+
+
+  Widget _build4MetricGrid(bool isDark) {
+    final metrics = _currentMetrics ?? _fitnessMetrics.currentMetrics;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            children: [
+              _buildMetricTile(
+                label: 'Steps',
+                value: '${metrics.totalSteps}',
+                unit: 'steps',
+                icon: Icons.directions_walk,
+                accentColor: const Color(0xFF10B981),
+                isDark: isDark,
+              ),
+              const SizedBox(height: 10),
+              _buildMetricTile(
+                label: 'Cadence',
+                value: metrics.cadenceSpm.toStringAsFixed(1),
+                unit: 'SPM',
+                icon: Icons.speed,
+                accentColor: const Color(0xFF06B6D4),
+                isDark: isDark,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            children: [
+              _buildMetricTile(
+                label: 'Calories',
+                value: metrics.totalCaloriesKcal.toStringAsFixed(1),
+                unit: 'kcal',
+                icon: Icons.local_fire_department,
+                accentColor: const Color(0xFFF59E0B),
+                isDark: isDark,
+              ),
+              const SizedBox(height: 10),
+              _buildMetricTile(
+                label: 'Duration',
+                value: _formatElapsed(),
+                unit: 'active',
+                icon: Icons.timer_outlined,
+                accentColor: const Color(0xFF8B5CF6),
+                isDark: isDark,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMetricTile({
+    required String label,
+    required String value,
+    required String unit,
+    required IconData icon,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final surfaceColor = isDark ? AppColors.darkCardSurface : AppColors.lightCardSurface;
+    final textColor = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 2),
+        boxShadow: AppShadows.bentoSm(isDark),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                ),
+              ),
+              Icon(icon, size: 14, color: accentColor),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'monospace',
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                unit,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: accentColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1214,15 +1940,24 @@ class _RecordScreenState extends State<RecordScreen>
             ],
           ),
           const SizedBox(height: 12),
-          // Large activity display text
-          Text(
-            _selectedLabel,
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.5,
-            ),
+          // Large activity display text with icon
+          Row(
+            children: [
+              Icon(_getIconForLabel(_selectedLabel), size: 26, color: _getColorForLabel(_selectedLabel)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _selectedLabel,
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: -0.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 4),
           // Subtitle

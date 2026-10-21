@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/activity_label_manager.dart';
 import '../../services/band_assignment_manager.dart';
 import '../../services/ble_service.dart';
+import '../../services/classifier_service.dart';
 import '../../services/database_service.dart';
 import '../../services/export_service.dart';
 import '../../services/laptop_training_service.dart';
@@ -50,4 +52,9 @@ Future<void> setupServiceLocator() async {
   // Laptop-Assisted Training Service
   final laptopTraining = LaptopTrainingService(ml: ml, prefs: prefs);
   getIt.registerSingleton<LaptopTrainingService>(laptopTraining);
+
+  // Edge ML Classifier Service (TFLite)
+  final classifier = ClassifierService.instance;
+  unawaited(classifier.initialize());
+  getIt.registerSingleton<ClassifierService>(classifier);
 }

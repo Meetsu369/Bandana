@@ -71,23 +71,19 @@ void main() {
     // 4. Export Raw Data Card
     expect(find.text('Export Raw Data'), findsOneWidget);
     expect(find.text('Export Raw CSV'), findsOneWidget);
-    expect(find.text('Preview Data Schema (14 Columns)'), findsOneWidget);
+    expect(find.text('Preview Data Schema (16 Columns - Synchronized)'), findsOneWidget);
 
     // 5. Expand collapsible schema disclosure widget
-    await tester.tap(find.text('Preview Data Schema (14 Columns)'));
+    await tester.tap(find.text('Preview Data Schema (16 Columns - Synchronized)'));
     await tester.pumpAndSettle();
 
     // Verify discrete badge pills are rendered
-    expect(find.text('sessionId'), findsOneWidget);
+    expect(find.text('timestamp_phone_ms'), findsOneWidget);
+    expect(find.text('sensor_tick_ms'), findsOneWidget);
+    expect(find.text('seq'), findsOneWidget);
+    expect(find.text('wrist_ax'), findsOneWidget);
+    expect(find.text('ankle_ax'), findsOneWidget);
     expect(find.text('activity'), findsOneWidget);
-    expect(find.text('timestamp'), findsOneWidget);
-    expect(find.text('ax'), findsOneWidget);
-    expect(find.text('ay'), findsOneWidget);
-    expect(find.text('az'), findsOneWidget);
-    expect(find.text('gx'), findsOneWidget);
-    expect(find.text('gy'), findsOneWidget);
-    expect(find.text('gz'), findsOneWidget);
-    expect(find.text('accelMag'), findsOneWidget);
 
     // 6. De-escalated minimal Delete Session button
     expect(find.text('Delete Session'), findsOneWidget);

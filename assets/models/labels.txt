@@ -1,0 +1,4 @@
+Sitting
+Standing_HandMove
+Walking
+Jumping

@@ -48,17 +48,17 @@ class CadenceDiagnostics {
       'received=$receivedCount accepted=$acceptedCount (dropped: bursts=$burstDroppedCount dupes=$duplicateDroppedCount outOfOrder=$outOfOrderCount) boundaries=$boundaryResetCount avgInterval=${avgAcceptedIntervalMs?.toStringAsFixed(1)}ms';
 }
 
-/// Enforces a deterministic, consistent 40 Hz accepted cadence per band.
+/// Enforces a deterministic, consistent cadence per band (nominally 50 Hz / 20 ms).
 ///
-/// 40 Hz has a nominal interval of 25 ms per sample.
+/// 50 Hz has a nominal interval of 20 ms per sample.
 /// This gate ensures that BLE burst delivery (where multiple buffered packets
 /// arrive in milliseconds) does not flood the recording pipeline or skew ML feature windows.
 ///
 /// It uses firmware monotonic [captureTimestampMs] as the primary timing reference.
 class BandCadenceGate {
   BandCadenceGate({
-    this.nominalIntervalMs = 25,
-    this.minIntervalThresholdMs = 12, // ~half nominal slot (Nyquist-safe floor)
+    this.nominalIntervalMs = 20,
+    this.minIntervalThresholdMs = 10, // ~half nominal slot (Nyquist-safe floor: 10ms for 50 Hz)
     this.sessionBoundaryThresholdMs = 100, // Discontinuity gap > 100ms triggers boundary reset
   });
 

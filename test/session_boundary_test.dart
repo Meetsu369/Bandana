@@ -135,10 +135,17 @@ void main() {
       expect(detector.isValidWindowDuration(window), isTrue);
     });
 
+    test('80 samples with 20ms spacing (50 Hz) is valid (1580ms span)', () {
+      final detector = SessionBoundaryDetector();
+      // 50 Hz = 20ms spacing: last = 79*20 = 1580ms (within 1400-2200)
+      final window = List.generate(80, (i) => createSample(captureTs: i * 20));
+      expect(detector.isValidWindowDuration(window), isTrue);
+    });
+
     test('too-short window (fast spacing) is rejected', () {
       final detector = SessionBoundaryDetector();
-      // 20ms spacing: last = 79*20 = 1580ms < 1800
-      final window = List.generate(80, (i) => createSample(captureTs: i * 20));
+      // 15ms spacing: last = 79*15 = 1185ms < 1400
+      final window = List.generate(80, (i) => createSample(captureTs: i * 15));
       expect(detector.isValidWindowDuration(window), isFalse);
     });
 
@@ -251,7 +258,7 @@ void main() {
 
     test('validateDualBandWindows - wrist invalid returns false', () {
       final detector = DualBandSessionDetector();
-      final wristWindow = List.generate(80, (i) => createSample(captureTs: i * 20)); // too fast
+      final wristWindow = List.generate(80, (i) => createSample(captureTs: i * 15)); // too fast (1185ms < 1400ms)
       final ankleWindow = List.generate(80, (i) => createSample(captureTs: i * 25)); // valid
 
       expect(detector.validateDualBandWindows(

@@ -103,9 +103,9 @@ void main() {
       for (int i = 0; i < 80; i++) {
         manager.addSample(createSample(captureTs: i * 25, role: BandRole.ankle));
       }
-      // Wrist: invalid 20ms spacing (too fast)
+      // Wrist: invalid 15ms spacing (too fast, 1185ms < 1400ms)
       for (int i = 0; i < 80; i++) {
-        manager.addSample(createSample(captureTs: i * 20, role: BandRole.wrist));
+        manager.addSample(createSample(captureTs: i * 15, role: BandRole.wrist));
       }
 
       final consumed = manager.tryConsumeDualBandWindow(
@@ -512,7 +512,7 @@ void main() {
     test('Validation rules are consistent between single and dual band', () {
       // Single band wrist
       for (int i = 0; i < 80; i++) {
-        manager.addSample(createSample(captureTs: i * 20, role: BandRole.wrist)); // Too fast
+        manager.addSample(createSample(captureTs: i * 15, role: BandRole.wrist)); // Too fast (1185ms < 1400ms)
       }
 
       final singleResult = manager.tryConsumeWindow(BandRole.wrist, validateDuration: true);
@@ -523,7 +523,7 @@ void main() {
 
       // Dual band with same invalid wrist data
       for (int i = 0; i < 80; i++) {
-        manager.addSample(createSample(captureTs: i * 20, role: BandRole.wrist));
+        manager.addSample(createSample(captureTs: i * 15, role: BandRole.wrist));
         manager.addSample(createSample(captureTs: i * 25, role: BandRole.ankle)); // Valid
       }
 

@@ -60,7 +60,7 @@ void main() {
     expect(find.text('PREVIEW MODE'), findsOneWidget);
     expect(find.text('Walking • 1.2 m/s'), findsOneWidget);
     expect(find.text('98.4% Confidence'), findsOneWidget);
-    expect(find.text('SIMULATED 6-AXIS IMU STREAM (40Hz)'), findsOneWidget);
+    expect(find.text('SIMULATED 6-AXIS IMU STREAM (50Hz)'), findsOneWidget);
 
     // Onboarding Guide Block
     expect(find.text('Ready to analyze your movement?'), findsOneWidget);

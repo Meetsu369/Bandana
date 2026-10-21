@@ -8,8 +8,8 @@ import 'src/core/theme/theme_provider.dart';
 import 'src/features/home/home_screen.dart';
 import 'src/features/history/history_screen.dart';
 import 'src/features/live/live_screen.dart';
-import 'src/features/profile/profile_screen.dart';
 import 'src/features/record/record_screen.dart';
+import 'src/features/training/training_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -101,11 +101,11 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final screens = <Widget>[
-      HomeScreen(),                          // 0: Home
-      LiveScreen(onStartRecording: _onStartRecording), // 1: Activity
-      RecordScreen(),                        // 2: Collect
-      HistoryScreen(onStartRecording: _onStartRecording), // 3: History
-      ProfileScreen(),                       // 4: Profile
+      const HomeScreen(),                                // 0: Home
+      LiveScreen(onStartRecording: _onStartRecording),   // 1: Activity / Live Recognition
+      const RecordScreen(),                              // 2: Record / Data Collection
+      const TrainingScreen(),                            // 3: Train / On-Device ML
+      HistoryScreen(onStartRecording: _onStartRecording),// 4: History / Past Sessions
     ];
 
     // Android back-gesture stability: Swiping back from tabs 1-4 navigates to Home tab
@@ -146,8 +146,8 @@ class _AppShellState extends State<AppShell> {
                 label: 'Home',
               ),
               NavigationDestination(
-                icon: Icon(Icons.directions_walk_outlined),
-                selectedIcon: Icon(Icons.directions_walk),
+                icon: Icon(Icons.directions_run_outlined),
+                selectedIcon: Icon(Icons.directions_run),
                 label: 'Activity',
               ),
               NavigationDestination(
@@ -156,14 +156,14 @@ class _AppShellState extends State<AppShell> {
                 label: 'Record',
               ),
               NavigationDestination(
+                icon: Icon(Icons.model_training_outlined),
+                selectedIcon: Icon(Icons.model_training),
+                label: 'Train',
+              ),
+              NavigationDestination(
                 icon: Icon(Icons.history_outlined),
                 selectedIcon: Icon(Icons.history),
                 label: 'History',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'Profile',
               ),
             ],
           ),

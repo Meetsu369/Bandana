@@ -1,0 +1,288 @@
+{
+  "generator": "BANDANA Wearable HAR System",
+  "schemaVersion": 2,
+  "exportedAt": "2026-10-21T16:54:58.192634",
+  "sessionCount": 28,
+  "sessions": [
+    {
+      "sessionId": 103,
+      "participantId": "rishabh",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T13:19:11.752942",
+      "endTime": "2026-10-21T13:20:14.974864",
+      "sampleCount": 6302,
+      "notes": null,
+      "filename": "rishabh_jumping_20261021_131911.csv"
+    },
+    {
+      "sessionId": 102,
+      "participantId": "rishabh",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T13:16:53.053040",
+      "endTime": "2026-10-21T13:18:59.757453",
+      "sampleCount": 12601,
+      "notes": null,
+      "filename": "rishabh_standing_hand_movement_20261021_131653.csv"
+    },
+    {
+      "sessionId": 101,
+      "participantId": "rishabh",
+      "activity": "Walking",
+      "startTime": "2026-10-21T13:14:35.386264",
+      "endTime": "2026-10-21T13:16:42.140401",
+      "sampleCount": 12649,
+      "notes": null,
+      "filename": "rishabh_walking_20261021_131435.csv"
+    },
+    {
+      "sessionId": 100,
+      "participantId": "chinmay",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T13:12:08.810314",
+      "endTime": "2026-10-21T13:13:11.789695",
+      "sampleCount": 6261,
+      "notes": null,
+      "filename": "chinmay_jumping_20261021_131208.csv"
+    },
+    {
+      "sessionId": 99,
+      "participantId": "chinmay",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T13:09:46.578290",
+      "endTime": "2026-10-21T13:11:49.296349",
+      "sampleCount": 12249,
+      "notes": null,
+      "filename": "chinmay_standing_hand_movement_20261021_130946.csv"
+    },
+    {
+      "sessionId": 98,
+      "participantId": "chinmay",
+      "activity": "Walking",
+      "startTime": "2026-10-21T13:07:33.522125",
+      "endTime": "2026-10-21T13:09:38.582330",
+      "sampleCount": 12349,
+      "notes": null,
+      "filename": "chinmay_walking_20261021_130733.csv"
+    },
+    {
+      "sessionId": 97,
+      "participantId": "pranit",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T12:29:50.198763",
+      "endTime": "2026-10-21T12:30:52.775779",
+      "sampleCount": 6227,
+      "notes": null,
+      "filename": "pranit_jumping_20261021_122950.csv"
+    },
+    {
+      "sessionId": 96,
+      "participantId": "pranit",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T12:27:38.200002",
+      "endTime": "2026-10-21T12:29:42.553481",
+      "sampleCount": 12384,
+      "notes": null,
+      "filename": "pranit_standing_hand_movement_20261021_122738.csv"
+    },
+    {
+      "sessionId": 95,
+      "participantId": "pranit",
+      "activity": "Walking",
+      "startTime": "2026-10-21T12:25:22.548738",
+      "endTime": "2026-10-21T12:27:25.459205",
+      "sampleCount": 12267,
+      "notes": null,
+      "filename": "pranit_walking_20261021_122522.csv"
+    },
+    {
+      "sessionId": 94,
+      "participantId": "smeet",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T12:15:39.725714",
+      "endTime": "2026-10-21T12:16:42.319476",
+      "sampleCount": 6215,
+      "notes": null,
+      "filename": "smeet_jumping_20261021_121539.csv"
+    },
+    {
+      "sessionId": 93,
+      "participantId": "smeet",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T12:13:04.252201",
+      "endTime": "2026-10-21T12:15:16.043899",
+      "sampleCount": 13142,
+      "notes": null,
+      "filename": "smeet_standing_hand_movement_20261021_121304.csv"
+    },
+    {
+      "sessionId": 92,
+      "participantId": "smeet",
+      "activity": "Walking",
+      "startTime": "2026-10-21T12:10:41.399467",
+      "endTime": "2026-10-21T12:12:48.178550",
+      "sampleCount": 12584,
+      "notes": null,
+      "filename": "smeet_walking_20261021_121041.csv"
+    },
+    {
+      "sessionId": 88,
+      "participantId": "sumeet",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T12:03:04.133596",
+      "endTime": "2026-10-21T12:04:06.619184",
+      "sampleCount": 6180,
+      "notes": null,
+      "filename": "sumeet_jumping_20261021_120304.csv"
+    },
+    {
+      "sessionId": 87,
+      "participantId": "sumeet",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T12:00:52.054121",
+      "endTime": "2026-10-21T12:02:56.422214",
+      "sampleCount": 12400,
+      "notes": null,
+      "filename": "sumeet_standing_hand_movement_20261021_120052.csv"
+    },
+    {
+      "sessionId": 86,
+      "participantId": "sumeet",
+      "activity": "Walking",
+      "startTime": "2026-10-21T11:58:21.333767",
+      "endTime": "2026-10-21T12:00:37.788106",
+      "sampleCount": 13584,
+      "notes": null,
+      "filename": "sumeet_walking_20261021_115821.csv"
+    },
+    {
+      "sessionId": 85,
+      "participantId": "aditya",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T11:55:49.241631",
+      "endTime": "2026-10-21T11:56:54.072031",
+      "sampleCount": 6463,
+      "notes": null,
+      "filename": "aditya_jumping_20261021_115549.csv"
+    },
+    {
+      "sessionId": 84,
+      "participantId": "aditya",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T11:53:19.708962",
+      "endTime": "2026-10-21T11:55:23.575750",
+      "sampleCount": 12345,
+      "notes": null,
+      "filename": "aditya_standing_hand_movement_20261021_115319.csv"
+    },
+    {
+      "sessionId": 83,
+      "participantId": "aditya",
+      "activity": "Walking",
+      "startTime": "2026-10-21T11:51:04.738554",
+      "endTime": "2026-10-21T11:53:08.357073",
+      "sampleCount": 12291,
+      "notes": null,
+      "filename": "aditya_walking_20261021_115104.csv"
+    },
+    {
+      "sessionId": 82,
+      "participantId": "taksh",
+      "activity": "Jumping",
+      "startTime": "2026-10-21T11:47:53.547351",
+      "endTime": "2026-10-21T11:48:58.207113",
+      "sampleCount": 6409,
+      "notes": null,
+      "filename": "taksh_jumping_20261021_114753.csv"
+    },
+    {
+      "sessionId": 81,
+      "participantId": "taksh",
+      "activity": "Standing Hand Movement",
+      "startTime": "2026-10-21T11:45:07.323018",
+      "endTime": "2026-10-21T11:47:12.197181",
+      "sampleCount": 12422,
+      "notes": null,
+      "filename": "taksh_standing_hand_movement_20261021_114507.csv"
+    },
+    {
+      "sessionId": 80,
+      "participantId": "taksh",
+      "activity": "Walking",
+      "startTime": "2026-10-21T11:42:48.337070",
+      "endTime": "2026-10-21T11:44:51.659913",
+      "sampleCount": 12288,
+      "notes": null,
+      "filename": "taksh_walking_20261021_114248.csv"
+    },
+    {
+      "sessionId": 77,
+      "participantId": "sumeet",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:31:15.716715",
+      "endTime": "2026-10-21T10:33:28.953246",
+      "sampleCount": 13304,
+      "notes": null,
+      "filename": "sumeet_sitting_20261021_103115.csv"
+    },
+    {
+      "sessionId": 76,
+      "participantId": "aditya",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:25:24.275230",
+      "endTime": "2026-10-21T10:27:42.413709",
+      "sampleCount": 13776,
+      "notes": null,
+      "filename": "aditya_sitting_20261021_102524.csv"
+    },
+    {
+      "sessionId": 75,
+      "participantId": "pranit",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:19:57.808672",
+      "endTime": "2026-10-21T10:22:02.409417",
+      "sampleCount": 12420,
+      "notes": null,
+      "filename": "pranit_sitting_20261021_101957.csv"
+    },
+    {
+      "sessionId": 74,
+      "participantId": "chinmay",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:16:11.283406",
+      "endTime": "2026-10-21T10:18:14.589119",
+      "sampleCount": 12285,
+      "notes": null,
+      "filename": "chinmay_sitting_20261021_101611.csv"
+    },
+    {
+      "sessionId": 73,
+      "participantId": "rishabh",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:12:46.759642",
+      "endTime": "2026-10-21T10:14:49.491988",
+      "sampleCount": 12210,
+      "notes": null,
+      "filename": "rishabh_sitting_20261021_101246.csv"
+    },
+    {
+      "sessionId": 72,
+      "participantId": "smeet",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:09:06.464266",
+      "endTime": "2026-10-21T10:11:12.821712",
+      "sampleCount": 12624,
+      "notes": null,
+      "filename": "smeet_sitting_20261021_100906.csv"
+    },
+    {
+      "sessionId": 71,
+      "participantId": "taksh",
+      "activity": "Sitting",
+      "startTime": "2026-10-21T10:05:44.521063",
+      "endTime": "2026-10-21T10:07:47.245378",
+      "sampleCount": 12177,
+      "notes": null,
+      "filename": "taksh_sitting_20261021_100544.csv"
+    }
+  ]
+}

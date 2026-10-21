@@ -158,8 +158,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
               ),
               if (_ml.canRollback30 || _ml.canRollback60)
                 TextButton.icon(
-                  icon: const Icon(Icons.history, size: 16),
-                  label: const Text('Rollback Model'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.history, size: 14),
+                  label: const Text(
+                    'Rollback',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
                   onPressed: () => _confirmRollbackDialog(),
                 ),
             ],

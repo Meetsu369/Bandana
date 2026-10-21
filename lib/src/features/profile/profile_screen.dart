@@ -1486,7 +1486,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: AppSpacing.sm),
           Text(
             'Version: 1.0.0 (Production Release)\n'
-            'Cadence: 40 Hz Dual-BLE Realtime Telemetry\n'
+            'Cadence: 50 Hz Dual-BLE Realtime Telemetry\n'
             'Inference: On-Device KNN / Logistic Regression (60 Features)',
             style: AppTypography.captionFor(brightness).copyWith(
               color: AppColors.textSecondary(brightness),

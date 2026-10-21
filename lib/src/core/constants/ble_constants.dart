@@ -14,10 +14,19 @@ class BleConstants {
   /// Default GATT Characteristic UUID (notify) for IMU data.
   static const String characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
-  /// IMU sample rate in Hz.
-  static const int sampleRateHz = 40;
+  /// Default GATT Control Characteristic UUID (write) for session commands & offline sync.
+  static const String controlCharacteristicUuid = '0000ffe2-0000-1000-8000-00805f9b34fb';
 
-  /// Number of samples in one sliding window (2 seconds at 40 Hz).
+  /// Control Opcodes
+  static const int opcodeStartRecording = 0x01;
+  static const int opcodeStopRecording = 0x02;
+  static const int opcodeStartOfflineSync = 0x03;
+  static const int opcodeClearOfflineStorage = 0x04;
+
+  /// IMU sample rate in Hz (locked to 50 Hz production rate).
+  static const int sampleRateHz = 50;
+
+  /// Number of samples in one sliding window (80 samples: 1.6s at 50 Hz, 2.0s at 40 Hz).
   static const int windowSize = 80;
 
   /// Number of axes in the IMU data stream (ax, ay, az, gx, gy, gz).

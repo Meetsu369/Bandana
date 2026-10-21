@@ -22,6 +22,7 @@ import '../../features/record/record_screen.dart';
 import '../../features/record/session_detail_screen.dart';
 import '../../features/history/history_screen.dart';
 import '../../features/settings/devices_screen.dart';
+import '../../features/profile/profile_screen.dart';
 
 /// Home screen – polished professional BANDANA experience.
 class HomeScreen extends StatefulWidget {
@@ -224,15 +225,30 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
-                          child: Text(
-                            _getGreeting(),
-                            style: AppTypography.displayFor(brightness).copyWith(
-                              fontSize: 32,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.8,
-                              color: theme.colorScheme.onSurface,
-                            ),
-                            maxLines: 1,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.asset(
+                                  'assets/banadana_logo.png',
+                                  width: 36,
+                                  height: 36,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                _getGreeting(),
+                                style: AppTypography.displayFor(brightness).copyWith(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.8,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                                maxLines: 1,
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -263,11 +279,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           const SizedBox(width: AppSpacing.xs),
-                          // Avatar Icon (Quick Access to Profile / Devices)
+                          // Avatar Icon (Quick Access to Profile)
                           GestureDetector(
                             onTap: () {
                               Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                                MaterialPageRoute(builder: (_) => const ProfileScreen()),
                               );
                             },
                             child: Container(

@@ -1,0 +1,46 @@
+{
+  "model_name": "BANDANA_X_ConvTrans",
+  "version": "1.0.0",
+  "sampling_rate_hz": 40.0,
+  "window_size_samples": 100,
+  "window_duration_seconds": 2.5,
+  "stride_samples": 25,
+  "stride_duration_seconds": 0.625,
+  "channels_per_band": 6,
+  "channel_names": [
+    "ax",
+    "ay",
+    "az",
+    "gx",
+    "gy",
+    "gz"
+  ],
+  "class_labels": [
+    "Cart Pushing",
+    "Cycling",
+    "Desk Typing",
+    "Jump Rope",
+    "Jumping Jacks",
+    "Running",
+    "Walking"
+  ],
+  "num_classes": 7,
+  "input_shapes": {
+    "x_wrist": [
+      1,
+      6,
+      100
+    ],
+    "x_ankle": [
+      1,
+      6,
+      100
+    ]
+  },
+  "output_shapes": {
+    "logits": [
+      1,
+      7
+    ]
+  }
+}

@@ -48,6 +48,9 @@ dependencies:
   share_plus: ^10.0.0
   archive: ^4.5.2
 
+  # On-device Deep Learning Inference
+  tflite_flutter: ^0.12.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -61,3 +64,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/banadana_logo.png
+    - assets/models/model_1d_cnn.tflite
+    - assets/models/model_conv_gru.tflite
+    - assets/models/model_logistic_regression.tflite
+    - assets/models/dual_band_model.tflite
+    - assets/models/labels.txt

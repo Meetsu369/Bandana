@@ -10,11 +10,12 @@ class SessionBoundaryDetector {
     this.maxWindowDurationMs = _defaultMaxWindowDurationMs,
   });
 
-  // 40 Hz = 25 ms per sample. 80 samples have 79 intervals.
-  // Expected first-to-last timestamp span = 79 * 25 = 1975 ms.
+  // 50 Hz = 20 ms per sample (79 * 20 = 1580 ms for 80 samples).
+  // 40 Hz = 25 ms per sample (79 * 25 = 1975 ms for 80 samples).
+  // Min 1400ms / Max 2200ms accommodates both rates with jitter tolerance.
   static const int _defaultSessionBoundaryThresholdMs = 100;
-  static const int _defaultMinWindowDurationMs = 1800;
-  static const int _defaultMaxWindowDurationMs = 2100;
+  static const int _defaultMinWindowDurationMs = 1400;
+  static const int _defaultMaxWindowDurationMs = 2200;
 
   final int sessionBoundaryThresholdMs;
   final int minWindowDurationMs;

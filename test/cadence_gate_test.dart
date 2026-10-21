@@ -30,6 +30,22 @@ void main() {
       gate = BandCadenceGate();
     });
 
+    test('accepts nominal 20ms intervals (50 Hz)', () {
+      expect(gate.processSample(createSample(captureTs: 1000)), CadenceDecision.accepted);
+      expect(gate.processSample(createSample(captureTs: 1020)), CadenceDecision.accepted);
+      expect(gate.processSample(createSample(captureTs: 1040)), CadenceDecision.accepted);
+      expect(gate.processSample(createSample(captureTs: 1060)), CadenceDecision.accepted);
+      expect(gate.processSample(createSample(captureTs: 1080)), CadenceDecision.accepted);
+
+      final diag = gate.diagnostics;
+      expect(diag.receivedCount, 5);
+      expect(diag.acceptedCount, 5);
+      expect(diag.burstDroppedCount, 0);
+      expect(diag.duplicateDroppedCount, 0);
+      expect(diag.avgAcceptedIntervalMs, 20.0);
+      expect(diag.acceptedHz, 50.0);
+    });
+
     test('accepts nominal 25ms intervals (40 Hz)', () {
       expect(gate.processSample(createSample(captureTs: 1000)), CadenceDecision.accepted);
       expect(gate.processSample(createSample(captureTs: 1025)), CadenceDecision.accepted);

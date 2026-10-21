@@ -165,7 +165,7 @@ class ErrorState extends StatelessWidget {
                 secondaryAction!,
                 const SizedBox(width: AppSpacing.sm),
               ],
-              if (primaryAction != null) primaryAction!,
+              ?primaryAction,
             ],
           ),
         ],

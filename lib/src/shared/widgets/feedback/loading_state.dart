@@ -111,8 +111,8 @@ class LoadingState extends StatelessWidget {
   /// Creates a loading state for generic operations.
   const LoadingState.generic({
     super.key,
-    required String message,
-    String? secondaryMessage,
+    required this.message,
+    this.secondaryMessage,
     this.color,
     this.size = 32,
     this.strokeWidth = 3,
@@ -121,8 +121,7 @@ class LoadingState extends StatelessWidget {
     this.messageStyle,
     this.secondaryMessageStyle,
     this.spacing = AppSpacing.md,
-  }) : message = message,
-       secondaryMessage = secondaryMessage;
+  });
 
   @override
   Widget build(BuildContext context) {

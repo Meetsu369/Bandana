@@ -684,7 +684,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
-    final isDark = brightness == Brightness.dark;
     final filtered = _filteredSessions;
     final grouped = _groupSessions(filtered);
     final groupedKeys = grouped.keys.toList();

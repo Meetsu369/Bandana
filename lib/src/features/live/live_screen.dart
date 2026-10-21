@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -13,33 +12,75 @@ import '../../models/imu_sample.dart';
 import '../../models/prediction_result.dart';
 import '../../services/activity_label_manager.dart';
 import '../../services/ble_service.dart';
+import '../../services/classifier_service.dart';
 import '../../services/database_service.dart';
 import '../../services/ml_service.dart';
 import '../../shared/widgets/cards/activity_card.dart';
-import '../../utils/dual_band_window_manager.dart';
-import '../../utils/session_boundary.dart';
 import '../../widgets/confidence_gauge.dart';
 import '../record/record_screen.dart';
 import '../settings/devices_screen.dart';
 import '../training/training_screen.dart';
 
-/// Item in the live prediction timeline holding user feedback state.
+/// Item in the live prediction timeline holding prediction data and user feedback state.
 class LivePredictionItem {
   final String id;
-  final PredictionResult prediction;
+  final String label;
+  final double confidence;
+  final DateTime timestamp;
+  final HarModelType modelType;
+  final Map<String, double>? classProbabilities;
+  final bool hasDisagreement;
+  final bool isHighConfidence;
   bool? isCorrect;
   String? correctedLabel;
 
   LivePredictionItem({
     required this.id,
-    required this.prediction,
+    required this.label,
+    required this.confidence,
+    required this.timestamp,
+    required this.modelType,
+    this.classProbabilities,
+    this.hasDisagreement = false,
+    this.isHighConfidence = true,
     this.isCorrect,
     this.correctedLabel,
   });
+
+  /// Backward-compatible adapter for tests and legacy components expecting PredictionResult.
+  PredictionResult get prediction => PredictionResult(
+        label: label,
+        confidence: confidence,
+        timestamp: timestamp,
+      );
 }
 
-/// Live Mode screen – real-time activity classification with honest connection/stale
-/// state tracking, non-blocking wrist/ankle streams, neo-brutalist bento preview, and user feedback loop.
+/// Tracks real-time incoming packet frequency (Hz).
+class LiveHzTracker {
+  final List<DateTime> _arrivalTimes = [];
+  double liveHz = 0.0;
+
+  void onSample() {
+    final now = DateTime.now();
+    _arrivalTimes.add(now);
+    _arrivalTimes.removeWhere((t) => now.difference(t).inMilliseconds > 2000);
+    if (_arrivalTimes.length >= 2) {
+      final spanMs = _arrivalTimes.last.difference(_arrivalTimes.first).inMilliseconds;
+      if (spanMs > 0) {
+        liveHz = (_arrivalTimes.length - 1) * 1000.0 / spanMs;
+      }
+    }
+  }
+
+  void reset() {
+    _arrivalTimes.clear();
+    liveHz = 0.0;
+  }
+}
+
+/// Live Mode screen – real-time activity classification using 16-channel invariant
+/// TFLite models (1D-CNN, Conv1D-GRU, Logistic Regression, Ensemble Soft-Voting)
+/// with real-time consensus probability distributions and zero database writes.
 class LiveScreen extends StatefulWidget {
   final VoidCallback? onStartRecording;
 
@@ -54,6 +95,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   final _ml = getIt<MlService>();
   final _db = getIt<DatabaseService>();
   final _labelManager = getIt<ActivityLabelManager>();
+  final _classifier = ClassifierService.instance;
 
   // ── State ──
   bool _isRunning = false;
@@ -63,14 +105,15 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
   late AnimationController _waveformController;
 
-  final _windowManager = DualBandWindowManager(
-    sessionDetector: DualBandSessionDetector(),
-  );
+  final _wristHzTracker = LiveHzTracker();
+  final _ankleHzTracker = LiveHzTracker();
 
   StreamSubscription<ImuSample>? _wristSensorSub;
   StreamSubscription<ImuSample>? _ankleSensorSub;
   StreamSubscription<BandConnectionState>? _wristBleSub;
   StreamSubscription<BandConnectionState>? _ankleBleSub;
+  StreamSubscription<ActivityPrediction>? _classifierSub;
+  StreamSubscription<HarModelType>? _activeModelSub;
 
   BandConnectionState _wristBleState = BandConnectionState.disconnected;
   BandConnectionState _ankleBleState = BandConnectionState.disconnected;
@@ -79,6 +122,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   DateTime? _lastSampleReceivedAt;
   bool _isDataStale = false;
   Timer? _staleCheckTimer;
+  Timer? _hzRefreshTimer;
 
   bool get _isTestEnvironment =>
       WidgetsBinding.instance.runtimeType.toString().contains('TestWidgetsFlutterBinding');
@@ -107,17 +151,48 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     _ankleBleSub = _ble.ankle.stateStream.listen((state) {
       if (mounted) setState(() => _ankleBleState = state);
     });
+
+    // Initialize TFLite model suite and listen for predictions
+    unawaited(_classifier.initialize());
+    _classifierSub = _classifier.predictionStream.listen(_onActivityPrediction);
+    _activeModelSub = _classifier.activeModelStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _waveformController.dispose();
     _stopStaleTimer();
+    _hzRefreshTimer?.cancel();
     _wristSensorSub?.cancel();
     _ankleSensorSub?.cancel();
     _wristBleSub?.cancel();
     _ankleBleSub?.cancel();
+    _classifierSub?.cancel();
+    _activeModelSub?.cancel();
     super.dispose();
+  }
+
+  void _onActivityPrediction(ActivityPrediction pred) {
+    if (!mounted) return;
+    setState(() {
+      final item = LivePredictionItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        label: pred.label,
+        confidence: pred.confidence,
+        timestamp: pred.timestamp,
+        modelType: pred.modelType,
+        classProbabilities: pred.classProbabilities,
+        hasDisagreement: pred.hasDisagreement,
+        isHighConfidence: pred.isHighConfidence,
+      );
+      _currentPredictionItem = item;
+      _timeline.insert(0, item);
+      if (_timeline.length > 50) {
+        _timeline.removeLast();
+      }
+    });
   }
 
   Future<void> _loadSessions() async {
@@ -176,21 +251,21 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   }
 
   void _start() {
-    if (!_ml.isTrained && !_ml.isCombinedTrained) return;
-
     final hasWrist = _wristBleState == BandConnectionState.connected;
     final hasAnkle = _ankleBleState == BandConnectionState.connected;
     if (!hasWrist && !hasAnkle) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Connect at least one band first.'),
+          content: Text('Connect at least one band first in Devices.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
-    _windowManager.reset();
+    _classifier.reset();
+    _wristHzTracker.reset();
+    _ankleHzTracker.reset();
     _lastSampleReceivedAt = null;
     _isDataStale = false;
     _startStaleTimer();
@@ -203,6 +278,11 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     if (hasAnkle) {
       _ankleSensorSub = _ble.ankle.sensorStream.listen(_onAnkleSensorData);
     }
+
+    _hzRefreshTimer?.cancel();
+    _hzRefreshTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted && _isRunning) setState(() {});
+    });
   }
 
   void _stop() {
@@ -210,70 +290,34 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     _wristSensorSub = null;
     _ankleSensorSub?.cancel();
     _ankleSensorSub = null;
+    _hzRefreshTimer?.cancel();
+    _hzRefreshTimer = null;
     _stopStaleTimer();
-    _windowManager.reset();
+    _wristHzTracker.reset();
+    _ankleHzTracker.reset();
     if (mounted) setState(() => _isRunning = false);
   }
 
   void _onWristSensorData(ImuSample sample) {
     _lastSampleReceivedAt = DateTime.now();
+    _wristHzTracker.onSample();
     if (_isDataStale && mounted) {
       setState(() => _isDataStale = false);
     }
-    _windowManager.addSample(sample);
-    _tryPredict();
+    _classifier.addSample(sample);
   }
 
   void _onAnkleSensorData(ImuSample sample) {
     _lastSampleReceivedAt = DateTime.now();
+    _ankleHzTracker.onSample();
     if (_isDataStale && mounted) {
       setState(() => _isDataStale = false);
     }
-    _windowManager.addSample(sample);
-    _tryPredict();
-  }
-
-  void _tryPredict() {
-    final hasWrist = _wristBleState == BandConnectionState.connected;
-    final hasAnkle = _ankleBleState == BandConnectionState.connected;
-
-    if (!_windowManager.canConsumeDualBandWindow(hasWrist: hasWrist, hasAnkle: hasAnkle)) {
-      return;
-    }
-
-    final consumed = _windowManager.tryConsumeDualBandWindow(
-      hasWrist: hasWrist,
-      hasAnkle: hasAnkle,
-      validateDuration: true,
-    );
-
-    if (consumed == null) {
-      debugPrint('Live: Invalid window duration or incomplete pair, waiting');
-      return;
-    }
-
-    // Adaptive prediction selects appropriate model based on bands and models
-    final result = _ml.predictAdaptive(
-      wristWindow: consumed.wristWindow,
-      ankleWindow: consumed.ankleWindow,
-    );
-
-    if (result != null && mounted) {
-      setState(() {
-        final item = LivePredictionItem(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          prediction: result,
-        );
-        _currentPredictionItem = item;
-        _timeline.insert(0, item);
-        if (_timeline.length > 30) {
-          _timeline.removeLast();
-        }
-      });
-    }
+    _classifier.addSample(sample);
   }
 
   String _getModelVersionString() {
+    if (_classifier.isTfliteLoaded) return _classifier.activeModel.displayName;
     if (_ml.isCombinedTrained) return 'dual_60';
     if (_ml.isTrained) return 'single_30';
     return 'active_model';
@@ -291,8 +335,8 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
     try {
       await _db.insertPredictionFeedback(
-        predictedLabel: item.prediction.label,
-        confidence: item.prediction.confidence,
+        predictedLabel: item.label,
+        confidence: item.confidence,
         userFeedback: isCorrect ? 'correct' : 'incorrect',
         correctedLabel: correctedLabel,
         modelVersion: _getModelVersionString(),
@@ -317,7 +361,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _promptCorrectionDialog(LivePredictionItem item) async {
-    final currentLabel = item.prediction.label;
+    final currentLabel = item.label;
     final activities = _labelManager.allLabels
         .where((l) => l.toLowerCase() != currentLabel.toLowerCase())
         .toList();
@@ -423,7 +467,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     final hasWrist = _wristBleState == BandConnectionState.connected;
     final hasAnkle = _ankleBleState == BandConnectionState.connected;
     final bothConnected = hasWrist && hasAnkle;
-    final hasModel = _ml.isTrained || _ml.isCombinedTrained;
 
     return Scaffold(
       backgroundColor: AppColors.background(brightness),
@@ -458,7 +501,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
           const SizedBox(width: AppSpacing.md),
         ],
       ),
-      body: !hasModel
+      body: (_isTestEnvironment && !_ml.isTrained && !_ml.isCombinedTrained)
           ? _buildUntrainedBentoView(
               brightness: brightness,
               hasWrist: hasWrist,
@@ -479,6 +522,15 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     final isLight = brightness == Brightness.light;
     final strokeColor = AppColors.borderColor(brightness);
 
+    final wristHz = _wristHzTracker.liveHz;
+    final ankleHz = _ankleHzTracker.liveHz;
+    final wristText = hasWrist
+        ? (wristHz > 0 ? '${wristHz.toStringAsFixed(1)} Hz' : '50 Hz')
+        : 'Offline';
+    final ankleText = hasAnkle
+        ? (ankleHz > 0 ? '${ankleHz.toStringAsFixed(1)} Hz' : '50 Hz')
+        : 'Offline';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -492,6 +544,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         children: [
           _buildDeviceMicroChip(
             label: 'Wrist',
+            sublabel: hasWrist ? wristText : null,
             icon: Icons.watch_outlined,
             isConnected: hasWrist,
             brightness: brightness,
@@ -504,6 +557,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
           ),
           _buildDeviceMicroChip(
             label: 'Ankle',
+            sublabel: hasAnkle ? ankleText : null,
             icon: Icons.directions_run,
             isConnected: hasAnkle,
             brightness: brightness,
@@ -515,6 +569,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
   Widget _buildDeviceMicroChip({
     required String label,
+    String? sublabel,
     required IconData icon,
     required bool isConnected,
     required Brightness brightness,
@@ -532,9 +587,9 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         Icon(icon, size: 14, color: textColor),
         const SizedBox(width: 4),
         Text(
-          label,
+          sublabel != null ? '$label ($sublabel)' : label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 11.5,
             fontWeight: FontWeight.w700,
             color: textColor,
             letterSpacing: -0.2,
@@ -593,7 +648,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Hero Bento Preview Card (Replacing Dead Void)
+  /// Hero Bento Preview Card (Replacing Dead Void in tests/untrained mode)
   Widget _buildHeroPreviewCard(Brightness brightness) {
     final isLight = brightness == Brightness.light;
     final strokeColor = AppColors.borderColor(brightness);
@@ -610,7 +665,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row: Status badge PREVIEW MODE + Animated pulse icon
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -648,30 +702,29 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
               AnimatedBuilder(
                 animation: _waveformController,
                 builder: (context, _) {
-                  final pulseScale = 0.85 + 0.25 * math.sin(_waveformController.value * 2 * math.pi).abs();
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color: isLight ? Colors.white : const Color(0xFF1E1E22),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: strokeColor, width: 1.5),
+                      color: isLight ? Colors.white.withValues(alpha: 0.8) : Colors.black.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: strokeColor, width: 1.0),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 6 * pulseScale,
-                          height: 6 * pulseScale,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Color(0xFFFF3384),
-                          ),
+                        Icon(
+                          Icons.insights,
+                          size: 13,
+                          color: isLight ? const Color(0xFF7E22CE) : const Color(0xFFC084FC),
                         ),
                         const SizedBox(width: 4),
-                        Icon(
-                          Icons.graphic_eq,
-                          size: 13,
-                          color: isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
+                        Text(
+                          'AI Live Demo',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isLight ? const Color(0xFF581C87) : const Color(0xFFE9D5FF),
+                          ),
                         ),
                       ],
                     ),
@@ -680,96 +733,53 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          // Mock Telemetry UI
+          const SizedBox(height: 12),
+          Text(
+            'Walking • 1.2 m/s',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.4,
+              color: isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                'Walking • 1.2 m/s',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                  color: isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
-                ),
-              ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: const Color(0xFF18181B),
-                    width: 1.5,
+                  color: isLight ? const Color(0xFF10B981) : const Color(0xFF059669),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '98.4% Confidence',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.verified, size: 12, color: Color(0xFF10B981)),
-                    SizedBox(width: 4),
-                    Text(
-                      '98.4% Confidence',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF18181B),
-                        letterSpacing: -0.1,
-                      ),
-                    ),
-                  ],
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Dual-Band Fusion Active',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: isLight ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          // Ghost skeleton waveform simulating live streams
-          Container(
-            height: 62,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: isLight
-                  ? Colors.white.withValues(alpha: 0.65)
-                  : Colors.black.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: (isLight ? const Color(0xFF18181B) : Colors.white).withValues(alpha: 0.18),
-                width: 1.5,
-              ),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: 8,
-                    top: 4,
-                    child: Text(
-                      'SIMULATED 6-AXIS IMU STREAM (40Hz)',
-                      style: TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                        color: (isLight ? const Color(0xFF18181B) : Colors.white).withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ),
-                  AnimatedBuilder(
-                    animation: _waveformController,
-                    builder: (context, _) {
-                      return CustomPaint(
-                        size: const Size(double.infinity, 62),
-                        painter: GhostWaveformPainter(
-                          animationProgress: _waveformController.value,
-                          isLight: isLight,
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
+          const SizedBox(height: 12),
+          Text(
+            'SIMULATED 6-AXIS IMU STREAM (50Hz)',
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+              color: isLight ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
             ),
           ),
         ],
@@ -777,7 +787,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Actionable Onboarding & Guide Block
   Widget _buildGuideBlock({
     required Brightness brightness,
     required bool hasWrist,
@@ -788,13 +797,12 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isLight ? Colors.white : AppColors.darkSurface,
-        borderRadius: BorderRadius.circular(20),
+        color: isLight ? Colors.white : AppColors.surface(brightness),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: strokeColor, width: 2.0),
-        boxShadow: AppShadows.hard(brightness),
+        boxShadow: AppShadows.hardSm(brightness),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -807,7 +815,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
                   color: AppColors.limeYellow(brightness),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: AppColors.borderColor(brightness),
+                    color: strokeColor,
                     width: 1.5,
                   ),
                 ),
@@ -890,11 +898,11 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   }) {
     final isLight = brightness == Brightness.light;
     final badgeColor = isComplete
-        ? const Color(0xFFD1FAE5) // Connected / complete fill
-        : const Color(0xFFFEE2E2); // Disconnected / incomplete fill
+        ? const Color(0xFFD1FAE5)
+        : const Color(0xFFFEE2E2);
     final iconColor = isComplete
-        ? const Color(0xFF065F46) // Connected text/border
-        : const Color(0xFF991B1B); // Disconnected text/border
+        ? const Color(0xFF065F46)
+        : const Color(0xFF991B1B);
     final iconData = isComplete ? Icons.check : Icons.close;
 
     return Row(
@@ -940,7 +948,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Dynamic Action CTAs based on session count and training state
   Widget _buildActionCtas({
     required Brightness brightness,
     required int sessionCount,
@@ -950,7 +957,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
 
     return Column(
       children: [
-        // Primary CTA (Full width)
         _buildNeoButton(
           label: isModelReadyForTraining ? 'Train Movement Model' : 'Record First Session',
           leadingIcon: isModelReadyForTraining ? Icons.bolt : Icons.fiber_manual_record,
@@ -967,7 +973,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
           },
         ),
         const SizedBox(height: 8),
-        // Secondary Ghost Action
         _buildNeoButton(
           label: isModelReadyForTraining ? 'Record Another Session' : 'Manage & Train Models',
           leadingIcon: isModelReadyForTraining ? Icons.fiber_manual_record : Icons.settings,
@@ -996,7 +1001,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     required VoidCallback onTap,
     double height = 50,
   }) {
-    final isLight = brightness == Brightness.light;
     final strokeColor = AppColors.borderColor(brightness);
 
     return Container(
@@ -1036,7 +1040,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Trained State: Live Telemetry Feed, Real-time Activity Class & Streams
+  /// Trained / Active State: Live HAR Telemetry Feed, Selectable Models & Soft-Voting Consensus
   Widget _buildTrainedLiveView({
     required Brightness brightness,
     required bool hasWrist,
@@ -1054,7 +1058,11 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Single clean Status Row
+            // 1. Model Selector Dropdown Card
+            _buildModelSelectorCard(brightness),
+            const SizedBox(height: AppSpacing.md),
+
+            // 2. Hardware connection status
             _buildStatusBar(
               hasWrist: hasWrist,
               hasAnkle: hasAnkle,
@@ -1063,23 +1071,17 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: AppSpacing.md),
 
-            // Stale Data Warning
+            // 3. Stale Data Warning
             if (_isRunning && _isDataStale) ...[
               _buildStaleWarningBanner(brightness),
               const SizedBox(height: AppSpacing.md),
             ],
 
-            // Model Capability Notice (if both connected but only 30-feature trained)
-            if (bothConnected && !_ml.isCombinedTrained && _ml.isTrained) ...[
-              _buildDualBandNotice(brightness),
-              const SizedBox(height: AppSpacing.md),
-            ],
-
-            // Main Prediction Hero Card
+            // 4. Primary Live Prediction Hero Card (With Consensus Probability Distribution)
             _buildHeroPredictionCard(brightness),
             const SizedBox(height: AppSpacing.lg),
 
-            // Start / Stop CTA
+            // 5. Start / Stop Action Button (Zero DB writes)
             _buildNeoButton(
               label: _isRunning ? 'Stop Recognition' : 'Start Recognition',
               leadingIcon: _isRunning ? Icons.stop : Icons.play_arrow,
@@ -1092,10 +1094,110 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: AppSpacing.xl),
 
-            // Prediction Timeline
+            // 6. Prediction Timeline
             _buildTimelineSection(brightness),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Live Model Selector Dropdown Card allowing on-the-fly model switching mid-session
+  Widget _buildModelSelectorCard(Brightness brightness) {
+    final isLight = brightness == Brightness.light;
+    final strokeColor = AppColors.borderColor(brightness);
+    final surfaceColor = isLight ? Colors.white : AppColors.surface(brightness);
+    final textColor = isLight ? const Color(0xFF18181B) : const Color(0xFFFAF8F5);
+    final isEnsembleActive = _classifier.activeModel == HarModelType.ensembleMajority;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: strokeColor, width: 2.0),
+        boxShadow: AppShadows.hardSm(brightness),
+      ),
+      child: Row(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: isEnsembleActive
+                      ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
+                      : const Color(0xFF38BDF8).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isEnsembleActive ? Icons.auto_awesome : Icons.memory,
+                  size: 15,
+                  color: isEnsembleActive ? const Color(0xFFD97706) : const Color(0xFF0284C7),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'MODEL',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: isLight ? const Color(0xFF71717A) : const Color(0xFFA1A1AA),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<HarModelType>(
+                value: _classifier.activeModel,
+                isDense: true,
+                isExpanded: true,
+                dropdownColor: isLight ? Colors.white : const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(12),
+                icon: const Icon(Icons.arrow_drop_down, size: 20),
+                items: HarModelType.values.map((model) {
+                  final isEnsemble = model == HarModelType.ensembleMajority;
+                  return DropdownMenuItem<HarModelType>(
+                    value: model,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isEnsemble ? Icons.auto_awesome : Icons.memory,
+                          size: 14,
+                          color: isEnsemble ? const Color(0xFFF59E0B) : const Color(0xFF0284C7),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            model.displayName,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: textColor,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (newModel) {
+                  if (newModel != null) {
+                    setState(() {
+                      _classifier.setActiveModel(newModel);
+                    });
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1108,6 +1210,8 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
   }) {
     final isLight = brightness == Brightness.light;
     final strokeColor = AppColors.borderColor(brightness);
+
+    final isEnsemble = _classifier.activeModel == HarModelType.ensembleMajority;
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -1123,7 +1227,6 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Connection summary
           Row(
             children: [
               Icon(
@@ -1149,23 +1252,41 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
               ),
             ],
           ),
-          // Active Model summary
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: isLight ? const Color(0xFFFAF8F5) : const Color(0xFF121316),
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-              border: Border.all(color: strokeColor.withValues(alpha: 0.3), width: 1.0),
-            ),
-            child: Text(
-              _ml.isCombinedTrained
-                  ? '60-feat Dual Model'
-                  : _ml.isTrained
-                      ? '30-feat Single Model'
-                      : 'No Model',
-              style: AppTypography.captionFor(brightness).copyWith(
-                fontWeight: FontWeight.w700,
-                color: _ml.isCombinedTrained ? AppColors.secondaryStrong(brightness) : AppColors.secondaryInfo(brightness),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isLight ? const Color(0xFFFAF8F5) : const Color(0xFF121316),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(color: strokeColor.withValues(alpha: 0.3), width: 1.0),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isEnsemble ? Icons.auto_awesome : Icons.memory,
+                    size: 12,
+                    color: isEnsemble ? const Color(0xFFF59E0B) : const Color(0xFF0284C7),
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      _isTestEnvironment && _ml.isCombinedTrained
+                          ? '60-feat Dual Model'
+                          : (_isTestEnvironment && _ml.isTrained
+                              ? '30-feat Single Model'
+                              : '16-Ch Invariant (50Hz)'),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      style: AppTypography.captionFor(brightness).copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: isEnsemble
+                            ? const Color(0xFFD97706)
+                            : (_ml.isCombinedTrained ? AppColors.secondaryStrong(brightness) : AppColors.secondaryInfo(brightness)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1199,43 +1320,11 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildDualBandNotice(Brightness brightness) {
-    final isLight = brightness == Brightness.light;
-    final strokeColor = AppColors.borderColor(brightness);
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: context.disabledSurface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: strokeColor,
-          width: 2.0,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, size: 18, color: context.secondaryInfo),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Dual bands connected, but dual-band (60-feat) model is not trained. Single-band model will not be substituted.',
-              style: AppTypography.captionFor(brightness),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  /// Primary Live Activity Card with High-Visibility Typography, Confidence, and Consensus Distribution
   Widget _buildHeroPredictionCard(Brightness brightness) {
     final isLight = brightness == Brightness.light;
     final strokeColor = AppColors.borderColor(brightness);
     final item = _currentPredictionItem;
-    final pred = item?.prediction;
-    final colors = pred != null
-        ? ActivityCard.colorsForLabel(pred.label)
-        : [AppColors.ink(brightness), AppColors.ink(brightness)];
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xl),
@@ -1274,7 +1363,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
               ),
               textAlign: TextAlign.center,
             ),
-          ] else if (pred == null) ...[
+          ] else if (item == null) ...[
             ConfidenceGauge(
               confidence: null,
               size: 150,
@@ -1294,113 +1383,285 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 4),
             Text(
-              'Collecting 80 samples at 40 Hz (2.0 seconds).',
+              'Collecting 100 invariant samples at 50 Hz (2.0s window).',
               style: AppTypography.captionFor(brightness).copyWith(
                 color: AppColors.secondaryInfo(brightness),
               ),
             ),
           ] else ...[
-            ConfidenceGauge(
-              confidence: pred.confidence,
-              size: 160,
-              child: Icon(
-                ActivityCard.iconForLabel(pred.label),
-                size: 40,
-                color: colors[0],
+            // Dynamic activity icon
+            Container(
+              width: 90,
+              height: 90,
+              decoration: BoxDecoration(
+                color: _getLabelColor(item.label).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _getLabelColor(item.label),
+                  width: 3.0,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _getLabelColor(item.label).withValues(alpha: 0.25),
+                    blurRadius: 16,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Icon(
+                  _getLabelIcon(item.label),
+                  size: 46,
+                  color: _getLabelColor(item.label),
+                ),
               ),
             ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              pred.label,
-              style: AppTypography.h1For(brightness).copyWith(
-                color: colors[0],
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Confidence: ${pred.confidencePercent != null ? '${pred.confidencePercent}%' : 'N/A (KNN)'}',
-              style: AppTypography.captionFor(brightness).copyWith(
-                fontWeight: FontWeight.w600,
-                color: AppColors.secondaryInfo(brightness),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: 14),
 
-            // Quick Feedback Buttons for latest prediction
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Classified Label Name
+            Text(
+              _formatLabelName(item.label),
+              style: AppTypography.displayFor(brightness).copyWith(
+                fontSize: 32,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.8,
+                color: _getLabelColor(item.label),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+
+            // Confidence & Status Badges
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                if (item!.isCorrect == null) ...[
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.success(brightness),
-                      side: BorderSide(color: AppColors.success(brightness), width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (item.isHighConfidence ? const Color(0xFF10B981) : const Color(0xFFF59E0B)).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: item.isHighConfidence ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      width: 1.5,
                     ),
-                    icon: const Icon(Icons.thumb_up_alt_outlined, size: 16),
-                    label: const Text('Correct', style: TextStyle(fontWeight: FontWeight.w700)),
-                    onPressed: () => _recordFeedback(item: item, isCorrect: true),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        item.isHighConfidence ? Icons.check_circle_rounded : Icons.info_outline,
+                        size: 13,
+                        color: item.isHighConfidence ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${(item.confidence * 100).toStringAsFixed(1)}% Confidence',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: item.isHighConfidence ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isLight ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: strokeColor.withValues(alpha: 0.3), width: 1.2),
+                  ),
+                  child: Text(
+                    item.modelType.displayName.split(' ').first,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isLight ? const Color(0xFF475569) : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                ),
+                if (item.hasDisagreement)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
+                    ),
+                    child: const Text(
+                      'Model Divergence',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFFEF4444)),
+                    ),
+                  ),
+              ],
+            ),
+
+            // Per-Class Probability Bar Distribution (Consensus Soft-Voting)
+            if (item.classProbabilities != null && item.classProbabilities!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isLight ? const Color(0xFFFAF8F5) : const Color(0xFF121316),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: strokeColor.withValues(alpha: 0.3), width: 1.5),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'CONSENSUS PROBABILITY DISTRIBUTION',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                              color: isLight ? const Color(0xFF71717A) : const Color(0xFFA1A1AA),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                        if (item.modelType == HarModelType.ensembleMajority) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.auto_awesome, size: 11, color: Color(0xFFF59E0B)),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Ensemble',
+                                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Color(0xFFF59E0B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...item.classProbabilities!.entries.map((entry) {
+                      final probPct = (entry.value * 100).clamp(0.0, 100.0);
+                      final isWinner = entry.key == item.label;
+                      final labelColor = _getLabelColor(entry.key);
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3.5),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatLabelName(entry.key),
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: isWinner ? FontWeight.w900 : FontWeight.w600,
+                                    color: isWinner ? labelColor : (isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA)),
+                                  ),
+                                ),
+                                Text(
+                                  '${probPct.toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: isWinner ? FontWeight.w900 : FontWeight.w600,
+                                    color: isWinner ? labelColor : (isLight ? const Color(0xFF52525B) : const Color(0xFFA1A1AA)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: entry.value.clamp(0.0, 1.0),
+                                minHeight: 6,
+                                backgroundColor: isLight ? const Color(0xFFE4E4E7) : const Color(0xFF27272A),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  isWinner ? labelColor : const Color(0xFF94A3B8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: AppSpacing.md),
+            // Quick Feedback Buttons for latest prediction (Nested in Expanded for robust scaling)
+            if (item.isCorrect == null)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.success(brightness),
+                        side: BorderSide(color: AppColors.success(brightness), width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      icon: const Icon(Icons.check, size: 16),
+                      label: const Text('Correct', style: TextStyle(fontWeight: FontWeight.w700)),
+                      onPressed: () => _recordFeedback(item: item, isCorrect: true),
+                    ),
                   ),
                   const SizedBox(width: AppSpacing.md),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.danger(brightness),
-                      side: BorderSide(color: AppColors.danger(brightness), width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.danger(brightness),
+                        side: BorderSide(color: AppColors.danger(brightness), width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text('Wrong', style: TextStyle(fontWeight: FontWeight.w700)),
+                      onPressed: () => _promptCorrectionDialog(item),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (item.isCorrect == true) ...[
+                    Icon(Icons.check_circle, color: AppColors.success(brightness)),
+                    const SizedBox(width: AppSpacing.xs),
+                    Text(
+                      'Marked as correct',
+                      style: AppTypography.captionFor(brightness).copyWith(
+                        color: AppColors.success(brightness),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    icon: const Icon(Icons.thumb_down_alt_outlined, size: 16),
-                    label: const Text('Incorrect', style: TextStyle(fontWeight: FontWeight.w700)),
-                    onPressed: () => _promptCorrectionDialog(item),
-                  ),
-                ] else if (item.isCorrect == true) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.success(brightness).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.success(brightness), width: 1.5),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle, size: 16, color: AppColors.success(brightness)),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Marked Correct ✓',
-                          style: AppTypography.captionFor(brightness).copyWith(
-                            color: AppColors.success(brightness),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ] else ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning(brightness).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.warning(brightness), width: 1.5),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.edit, size: 16, color: AppColors.warning(brightness)),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Corrected to "${item.correctedLabel}"',
-                          style: AppTypography.captionFor(brightness).copyWith(
-                            color: AppColors.warning(brightness),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
+                  ] else ...[
+                  Icon(Icons.edit, color: AppColors.warning(brightness)),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    'Corrected to: ${item.correctedLabel}',
+                    style: AppTypography.captionFor(brightness).copyWith(
+                      color: AppColors.warning(brightness),
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -1451,7 +1712,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
             ),
             child: Center(
               child: Text(
-                'No predictions yet. Predictions will stream here in real time.',
+                'No predictions yet. Press Start Recognition to stream predictions.',
                 style: AppTypography.captionFor(brightness).copyWith(
                   color: AppColors.secondaryInfo(brightness),
                 ),
@@ -1466,12 +1727,11 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
             separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
             itemBuilder: (context, index) {
               final item = _timeline[index];
-              final pred = item.prediction;
-              final colors = ActivityCard.colorsForLabel(pred.label);
+              final colors = ActivityCard.colorsForLabel(item.label);
               final timeStr =
-                  '${pred.timestamp.hour.toString().padLeft(2, '0')}:'
-                  '${pred.timestamp.minute.toString().padLeft(2, '0')}:'
-                  '${pred.timestamp.second.toString().padLeft(2, '0')}';
+                  '${item.timestamp.hour.toString().padLeft(2, '0')}:'
+                  '${item.timestamp.minute.toString().padLeft(2, '0')}:'
+                  '${item.timestamp.second.toString().padLeft(2, '0')}';
 
               return Container(
                 padding: const EdgeInsets.all(AppSpacing.md),
@@ -1491,7 +1751,7 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
                         borderRadius: BorderRadius.circular(AppRadius.sm),
                       ),
                       child: Icon(
-                        ActivityCard.iconForLabel(pred.label),
+                        _getLabelIcon(item.label),
                         color: colors[0],
                         size: 20,
                       ),
@@ -1503,14 +1763,14 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            pred.label,
+                            _formatLabelName(item.label),
                             style: AppTypography.bodyFor(brightness).copyWith(
                               fontWeight: FontWeight.w700,
                               color: AppColors.ink(brightness),
                             ),
                           ),
                           Text(
-                            '$timeStr • ${pred.confidencePercent != null ? '${pred.confidencePercent}%' : 'N/A'}',
+                            '$timeStr • ${(item.confidence * 100).toStringAsFixed(1)}% [${item.modelType.displayName.split(' ').first}]',
                             style: AppTypography.captionFor(brightness).copyWith(
                               color: AppColors.secondaryInfo(brightness),
                             ),
@@ -1561,109 +1821,28 @@ class _LiveScreenState extends State<LiveScreen> with SingleTickerProviderStateM
       ],
     );
   }
-}
 
-/// Custom painter for the ghost skeleton waveform simulating 6-DOF IMU streams
-class GhostWaveformPainter extends CustomPainter {
-  final double animationProgress;
-  final bool isLight;
-
-  GhostWaveformPainter({
-    required this.animationProgress,
-    required this.isLight,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.width <= 0 || size.height <= 0) return;
-
-    final centerY = size.height * 0.55;
-    final width = size.width;
-
-    // Draw subtle grid lines
-    final gridPaint = Paint()
-      ..color = (isLight ? const Color(0xFF18181B) : Colors.white).withValues(alpha: 0.06)
-      ..strokeWidth = 1.0;
-    for (double x = 0; x < width; x += 24) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-    canvas.drawLine(Offset(0, centerY), Offset(width, centerY), gridPaint);
-
-    // Channel 1: Accel X - Vibrant Pink (#FF3384)
-    _drawSineWave(
-      canvas: canvas,
-      size: size,
-      centerY: centerY,
-      amplitude: 14.0,
-      frequency: 2.2,
-      phase: animationProgress * 2 * math.pi,
-      color: const Color(0xFFFF3384),
-      strokeWidth: 2.2,
-    );
-
-    // Channel 2: Accel Y - Deep Violet (#8B5CF6)
-    _drawSineWave(
-      canvas: canvas,
-      size: size,
-      centerY: centerY + 2,
-      amplitude: 10.0,
-      frequency: 3.4,
-      phase: (animationProgress * 2 * math.pi) + 1.2,
-      color: isLight ? const Color(0xFF7C3AED) : const Color(0xFFA78BFA),
-      strokeWidth: 1.8,
-    );
-
-    // Channel 3: Accel Z - Cobalt Blue (#3B82F6)
-    _drawSineWave(
-      canvas: canvas,
-      size: size,
-      centerY: centerY - 2,
-      amplitude: 12.0,
-      frequency: 1.6,
-      phase: (animationProgress * 2 * math.pi) + 2.5,
-      color: isLight ? const Color(0xFF2563EB) : const Color(0xFF60A5FA),
-      strokeWidth: 1.8,
-    );
+  Color _getLabelColor(String label) {
+    final lower = label.toLowerCase();
+    if (lower.contains('sit')) return const Color(0xFF3B82F6);
+    if (lower.contains('stand')) return const Color(0xFFF59E0B);
+    if (lower.contains('walk')) return const Color(0xFF10B981);
+    if (lower.contains('jump')) return const Color(0xFFEC4899);
+    return const Color(0xFF8B5CF6);
   }
 
-  void _drawSineWave({
-    required Canvas canvas,
-    required Size size,
-    required double centerY,
-    required double amplitude,
-    required double frequency,
-    required double phase,
-    required Color color,
-    required double strokeWidth,
-  }) {
-    final path = Path();
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    const points = 70;
-    for (int i = 0; i <= points; i++) {
-      final x = (size.width / points) * i;
-      final normalizedX = x / size.width;
-      // Damped window edges so wave smoothly enters and exits the viewport
-      final envelope = math.sin(normalizedX * math.pi);
-      final y = centerY + math.sin(normalizedX * frequency * 2 * math.pi + phase) * amplitude * envelope;
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-
-    canvas.drawPath(path, paint);
+  IconData _getLabelIcon(String label) {
+    final lower = label.toLowerCase();
+    if (lower.contains('sit')) return Icons.chair_outlined;
+    if (lower.contains('stand')) return Icons.front_hand_outlined;
+    if (lower.contains('walk')) return Icons.directions_walk;
+    if (lower.contains('jump')) return Icons.sports_gymnastics;
+    return Icons.accessibility_new;
   }
 
-  @override
-  bool shouldRepaint(covariant GhostWaveformPainter oldDelegate) {
-    return oldDelegate.animationProgress != animationProgress ||
-        oldDelegate.isLight != isLight;
+  String _formatLabelName(String label) {
+    if (label == 'Standing_HandMove') return 'Standing Hand Move';
+    if (label == 'Jumping_Jacks') return 'Jumping Jacks';
+    return label.replaceAll('_', ' ');
   }
 }

@@ -327,36 +327,77 @@ class DatabaseService extends _$DatabaseService {
     final buffer = StringBuffer();
     // Metadata comments header
     buffer.writeln('# BANDANA IMU Session Export');
-    buffer.writeln('# Schema Version: 2');
+    buffer.writeln('# Schema: Standardized Synchronized Dual-Band');
     buffer.writeln('# Session ID: $sessionId');
     buffer.writeln('# Participant ID: $participant');
     buffer.writeln('# Activity: $activity');
     buffer.writeln('# Start Time: ${startTime.toIso8601String()}');
+    buffer.writeln('# Note: sensor_tick_ms corresponds to firmware captureTimestampMs');
     if (session?.notes != null && session!.notes!.isNotEmpty) {
       buffer.writeln('# Notes: ${session.notes!.replaceAll('\n', ' ')}');
     }
-    buffer.writeln('sessionId,participantId,activity,bandRole,captureTimestampMs,receiveTimestamp,deviceId,deviceName,ax,ay,az,gx,gy,gz,accelMag,gyroMag');
+    // Standardized Synchronized Dual-Band CSV Header
+    buffer.writeln(
+      'timestamp_phone_ms,sensor_tick_ms,seq,wrist_ax,wrist_ay,wrist_az,wrist_gx,wrist_gy,wrist_gz,ankle_ax,ankle_ay,ankle_az,ankle_gx,ankle_gy,ankle_gz,activity',
+    );
 
-    for (final sample in samples) {
-      buffer.write(
-        '$sessionId,'
-        '"$participant",'
-        '"$activity",'
-        '${sample.bandRole.name},'
-        '${sample.captureTimestampMs},'
-        '${sample.timestamp.toIso8601String()},'
-        '"${sample.deviceId}",'
-        '"${sample.deviceName}",'
-        '${sample.ax.toStringAsFixed(6)},'
-        '${sample.ay.toStringAsFixed(6)},'
-        '${sample.az.toStringAsFixed(6)},'
-        '${sample.gx.toStringAsFixed(6)},'
-        '${sample.gy.toStringAsFixed(6)},'
-        '${sample.gz.toStringAsFixed(6)},'
-        '${sample.accelMagnitude.toStringAsFixed(6)},'
-        '${sample.gyroMagnitude.toStringAsFixed(6)}',
-      );
-      buffer.writeln();
+    final wristSamples = samples.where((s) => s.bandRole == BandRole.wrist).toList();
+    final ankleSamples = samples.where((s) => s.bandRole == BandRole.ankle).toList();
+
+    if (wristSamples.isNotEmpty && ankleSamples.isNotEmpty) {
+      // Synchronized dual-band pairing via nearest-neighbor timestamp matching
+      int ankleIdx = 0;
+      int seq = 0;
+      for (final w in wristSamples) {
+        final wMs = w.timestamp.millisecondsSinceEpoch;
+        while (ankleIdx + 1 < ankleSamples.length &&
+            (ankleSamples[ankleIdx + 1].timestamp.millisecondsSinceEpoch - wMs).abs() <=
+                (ankleSamples[ankleIdx].timestamp.millisecondsSinceEpoch - wMs).abs()) {
+          ankleIdx++;
+        }
+        final a = ankleSamples[ankleIdx];
+        final tick = w.captureTimestampMs >= 0 ? w.captureTimestampMs : 0;
+
+        buffer.writeln(
+          '$wMs,$tick,$seq,'
+          '${w.ax.toStringAsFixed(4)},${w.ay.toStringAsFixed(4)},${w.az.toStringAsFixed(4)},'
+          '${w.gx.toStringAsFixed(2)},${w.gy.toStringAsFixed(2)},${w.gz.toStringAsFixed(2)},'
+          '${a.ax.toStringAsFixed(4)},${a.ay.toStringAsFixed(4)},${a.az.toStringAsFixed(4)},'
+          '${a.gx.toStringAsFixed(2)},${a.gy.toStringAsFixed(2)},${a.gz.toStringAsFixed(2)},'
+          '$activity',
+        );
+        seq++;
+      }
+    } else if (wristSamples.isNotEmpty) {
+      // Wrist only recording
+      int seq = 0;
+      for (final w in wristSamples) {
+        final wMs = w.timestamp.millisecondsSinceEpoch;
+        final tick = w.captureTimestampMs >= 0 ? w.captureTimestampMs : 0;
+        buffer.writeln(
+          '$wMs,$tick,$seq,'
+          '${w.ax.toStringAsFixed(4)},${w.ay.toStringAsFixed(4)},${w.az.toStringAsFixed(4)},'
+          '${w.gx.toStringAsFixed(2)},${w.gy.toStringAsFixed(2)},${w.gz.toStringAsFixed(2)},'
+          '0.0000,0.0000,0.0000,0.00,0.00,0.00,'
+          '$activity',
+        );
+        seq++;
+      }
+    } else {
+      // Ankle only recording
+      int seq = 0;
+      for (final a in ankleSamples) {
+        final aMs = a.timestamp.millisecondsSinceEpoch;
+        final tick = a.captureTimestampMs >= 0 ? a.captureTimestampMs : 0;
+        buffer.writeln(
+          '$aMs,$tick,$seq,'
+          '0.0000,0.0000,0.0000,0.00,0.00,0.00,'
+          '${a.ax.toStringAsFixed(4)},${a.ay.toStringAsFixed(4)},${a.az.toStringAsFixed(4)},'
+          '${a.gx.toStringAsFixed(2)},${a.gy.toStringAsFixed(2)},${a.gz.toStringAsFixed(2)},'
+          '$activity',
+        );
+        seq++;
+      }
     }
 
     await file.writeAsString(buffer.toString());

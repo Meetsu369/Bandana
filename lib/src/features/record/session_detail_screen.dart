@@ -39,20 +39,22 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   late TextEditingController _notesController;
 
   static const List<String> _csvColumns = [
-    'sessionId',
+    'timestamp_phone_ms',
+    'sensor_tick_ms',
+    'seq',
+    'wrist_ax',
+    'wrist_ay',
+    'wrist_az',
+    'wrist_gx',
+    'wrist_gy',
+    'wrist_gz',
+    'ankle_ax',
+    'ankle_ay',
+    'ankle_az',
+    'ankle_gx',
+    'ankle_gy',
+    'ankle_gz',
     'activity',
-    'timestamp',
-    'bandRole',
-    'deviceId',
-    'deviceName',
-    'ax',
-    'ay',
-    'az',
-    'gx',
-    'gy',
-    'gz',
-    'accelMag',
-    'gyroMag',
   ];
 
   @override
@@ -647,7 +649,7 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Preview Data Schema (14 Columns)',
+                            'Preview Data Schema (16 Columns - Synchronized)',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,

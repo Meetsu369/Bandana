@@ -252,7 +252,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     theme,
                     icon: Icons.developer_mode,
                     label: 'Firmware Baseline',
-                    value: '71119af (40 Hz, dual-band)',
+                    value: 'Production (50 Hz, 20B binary)',
                   ),
                   const Divider(height: 24),
                   _buildSettingsRow(

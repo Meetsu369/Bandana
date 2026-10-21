@@ -105,7 +105,7 @@ class HeroMetricCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (trailingAction != null) trailingAction!,
+            ?trailingAction,
           ],
         ),
         const SizedBox(height: AppSpacing.md),
